@@ -114,6 +114,9 @@ h1,h2,h3,p{margin:0}
 .file-meta{flex:1;min-width:0}
 .file-meta .name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-meta .sub{font-size:11px;color:var(--muted)}
+.file-progress{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11px;font-weight:700;color:var(--accent)}
+.file-progress-bar{height:5px;flex:1;max-width:150px;border-radius:999px;background:var(--line);overflow:hidden}
+.file-progress-bar i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .12s}
 .file-remove{font-size:11px;font-weight:600;color:var(--bad);padding:5px 9px;border-radius:7px}
 .file-remove:hover{background:var(--bad-soft)}
 
@@ -224,8 +227,18 @@ function guessColumn(names, hints){
 
 // Reads one file in a Web Worker so parsing a large CSV or workbook cannot
 // lock the page and trigger Chrome's "Page Unresponsive" dialog.
-async function parseFile(file){
+async function parseFile(file, onProgress){
   const ext = file.name.toLowerCase().split('.').pop();
+  const readData = await new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onprogress = event => {
+      if(event.lengthComputable) onProgress?.(Math.round((event.loaded/event.total)*100));
+    };
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    if(ext === 'csv' || ext === 'txt') reader.readAsText(file);
+    else reader.readAsArrayBuffer(file);
+  });
   const utilsUrl = new URL('./utils.js', window.location.href).href;
   const xlsxUrl = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
   const workerSource = `
@@ -235,22 +248,23 @@ async function parseFile(file){
     }
     self.onmessage = async function(event) {
       try {
-        const file = event.data.file;
         const ext = event.data.ext;
+        const readData = event.data.readData;
+        const fileName = event.data.fileName;
         const tables = [];
         if(ext === 'csv' || ext === 'txt'){
-          const text = await file.text();
+          const text = typeof readData === 'string' ? readData : new TextDecoder().decode(readData);
           const parsed = LeadCleanUtils.parseCsv(text);
-          tables.push({label:file.name, header:parsed.header, rows:parsed.rows});
+          tables.push({label:fileName, header:parsed.header, rows:parsed.rows});
         }else{
-          const buf = await file.arrayBuffer();
+          const buf = readData;
           const wb = XLSX.read(buf, {type:'array', dense:true});
           wb.SheetNames.forEach(function(name){
             const ws = wb.Sheets[name];
             const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
             if(!grid.length) return;
             const header = (grid[0] || []).map(function(h){ return String(h).trim(); });
-            const label = wb.SheetNames.length > 1 ? (file.name + ' › ' + name) : file.name;
+            const label = wb.SheetNames.length > 1 ? (fileName + ' › ' + name) : fileName;
             tables.push({label:label, header:header, rows:grid.slice(1)});
           });
         }
@@ -277,7 +291,9 @@ async function parseFile(file){
       URL.revokeObjectURL(workerUrl);
       reject(new Error(event.message || 'Could not read that file'));
     };
-    worker.postMessage({file, ext});
+    onProgress?.(100);
+    const transferable = readData instanceof ArrayBuffer ? [readData] : [];
+    worker.postMessage({readData, ext, fileName:file.name}, transferable);
   });
 }
 
@@ -307,6 +323,7 @@ function App(){
   const [tables, setTables] = useState([]);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState('');
+  const [fileReadProgress, setFileReadProgress] = useState({});
   const rowsRef = useRef(new Map());
 
   const [mode, setMode] = useState('unique');
@@ -371,7 +388,8 @@ function App(){
     setFiles(fs => [...fs, ...newFileMetas]);
     try{
       for(let i=0;i<accepted.length;i++){
-        const parsed = await parseFile(accepted[i]);
+        setFileReadProgress(p=>({...p,[newFileMetas[i].id]:0}));
+        const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[newFileMetas[i].id]:pct})));
         const fileId = newFileMetas[i].id;
         setTables(ts => {
           const added = parsed.map((t,idx) => {
@@ -393,6 +411,7 @@ function App(){
 
   const removeFile = useCallback((fileId)=>{
     setFiles(fs => fs.filter(f=>f.id!==fileId));
+    setFileReadProgress(p=>{const next={...p};delete next[fileId];return next;});
     setTables(ts => {
       const keep = ts.filter(t=>t.fileId!==fileId);
       ts.filter(t=>t.fileId===fileId).forEach(t=>rowsRef.current.delete(t.id));
@@ -406,7 +425,8 @@ function App(){
     const metas = accepted.map(f => ({id:f.name+'_'+f.size+'_'+Date.now()+Math.random(), name:f.name, size:f.size}));
     setLookupFiles(fs=>[...fs, ...metas]);
     for(let i=0;i<accepted.length;i++){
-      const parsed = await parseFile(accepted[i]);
+      setFileReadProgress(p=>({...p,[metas[i].id]:0}));
+      const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[metas[i].id]:pct})));
       const fileId = metas[i].id;
       setLookupTables(ts=>{
         const added = parsed.map((t,idx)=>{
@@ -520,9 +540,19 @@ function App(){
     setSelectedColumns(cols => cols.includes(name) ? cols.filter(c=>c!==name) : [...cols, name]);
   }
 
-  function cleanOutputName(name, fallback, index){
+  function cleanOutputName(name, fallback, index, splitFile=false){
     const trimmed = String(name || '').trim();
-    const withBase = trimmed || fallback;
+    let withBase = trimmed || fallback;
+    if(splitFile){
+      if(withBase.toLowerCase().endsWith('.csv')) withBase = withBase.slice(0,-4);
+      const trailingNumber = withBase.match(/^(.*?)(?:_|-)(\d+)$/);
+      if(trailingNumber){
+        const separator = withBase.includes('_'+trailingNumber[2]) ? '_' : '-';
+        withBase = trailingNumber[1] + separator + (Number(trailingNumber[2])+index);
+      }else{
+        withBase = withBase + '_' + (index+1);
+      }
+    }
     return (withBase.toLowerCase().endsWith('.csv') ? withBase : withBase + '.csv').replace(/[\\/:*?"<>|]/g, '-');
   }
 
@@ -532,6 +562,24 @@ function App(){
       next[index] = value;
       return next;
     });
+  }
+
+  function _baseFilenamePreview(base, mode, count){
+    let name = String(base || '').trim();
+    if(!name) name = mode==='merge' ? 'merged_leads' : 'unique_mobiles';
+    if(name.toLowerCase().endsWith('.csv')) name = name.slice(0,-4);
+    name = name.replace(/[\\/:*?"<>|]/g,'-');
+    const names = [];
+    const trailingNumber = name.match(/^(.*?)(?:_|-)(\d+)$/);
+    for(let i=0;i<count;i++){
+      if(trailingNumber){
+        const separator = name.includes('_'+trailingNumber[2]) ? '_' : '-';
+        names.push(trailingNumber[1]+separator+(Number(trailingNumber[2])+i)+'.csv');
+      }else{
+        names.push(name+'_'+(i+1)+'.csv');
+      }
+    }
+    return names.join(', ');
   }
 
   async function runProcess(){
@@ -634,7 +682,7 @@ function App(){
       if(curRowCount > 0 || mergeOutputs.length === 0) flushMergePart();
       outputs = mergeOutputs.map((out, idx) => {
         const fallback = mergeOutputs.length > 1 ? ('merged_leads_part'+(idx+1)+'.csv') : 'merged_leads.csv';
-        return {...out, name:cleanOutputName(outputNames[idx], fallback, idx)};
+        return {...out, name:cleanOutputName(outputNames[0], fallback, idx, mergeOutputs.length > 1)};
       });
     } else {
       const header = ['mobile'];
@@ -652,7 +700,7 @@ function App(){
         p.forEach(n => chunks.push(csvEscape(n) + '\r\n'));
         const blob = new Blob(chunks, {type:'text/csv'});
         const fallback = parts.length>1 ? ('unique_mobiles_part'+(idx+1)+'.csv') : 'unique_mobiles.csv';
-        const name = cleanOutputName(outputNames[idx], fallback, idx);
+        const name = cleanOutputName(outputNames[0], fallback, idx, parts.length > 1);
         return {name, size:blob.size, rowCount:p.length, blob, saved:false};
       });
     }
@@ -857,6 +905,12 @@ function App(){
                   <div className="file-meta">
                     <div className="name">{f.name}</div>
                     <div className="sub">{fmtBytes(f.size)} · {tables.filter(t=>t.fileId===f.id).reduce((a,t)=>a+t.rowCount,0).toLocaleString('en-IN')} rows</div>
+                    {fileReadProgress[f.id] !== undefined && (
+                      <div className="file-progress">
+                        <span>{fileReadProgress[f.id] >= 100 ? 'Read 100%' : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                        <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
+                      </div>
+                    )}
                   </div>
                   <button className="file-remove" onClick={()=>removeFile(f.id)}>Remove</button>
                 </div>
@@ -934,7 +988,16 @@ function App(){
                     {lookupFiles.map(f=>(
                       <div className="file-row" key={f.id}>
                         <span className="file-icon">{f.name.split('.').pop().slice(0,3).toUpperCase()}</span>
-                        <div className="file-meta"><div className="name">{f.name}</div><div className="sub">{fmtBytes(f.size)}</div></div>
+                        <div className="file-meta">
+                          <div className="name">{f.name}</div>
+                          <div className="sub">{fmtBytes(f.size)}</div>
+                          {fileReadProgress[f.id] !== undefined && (
+                            <div className="file-progress">
+                              <span>{fileReadProgress[f.id] >= 100 ? 'Read 100%' : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                              <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1005,21 +1068,16 @@ function App(){
                   </div>
                 )}
                 <div className="field">
-                    <label>Output filenames</label>
-                    {Array.from({length: splitPartCount}).map((_,idx)=>{
-                      const prefix = mode==='merge' ? 'merged_leads_part' : 'unique_mobiles_part';
-                      const placeholder = prefix + (idx+1);
-                      return (
-                        <input
-                          key={idx}
-                          className="text-input"
-                          style={{marginTop:idx===0 ? 0 : 8}}
-                          value={outputNames[idx] || ''}
-                          placeholder={placeholder + '.csv'}
-                          onChange={e=>setOutputName(idx,e.target.value)}
-                        />
-                      );
-                    })}
+                    <label>Output filename base</label>
+                    <input
+                      className="text-input"
+                      value={outputNames[0] || ''}
+                      placeholder={mode==='merge' ? 'merged_leads' : 'unique_mobiles'}
+                      onChange={e=>setOutputName(0,e.target.value)}
+                    />
+                    {splitMode !== 'none' && splitPartCount > 1 && (
+                      <p className="hint">Creates {_baseFilenamePreview(outputNames[0], mode, splitPartCount)}</p>
+                    )}
                   </div>
               </div>
             </section>
