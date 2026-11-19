@@ -210,30 +210,63 @@ function guessColumn(names, hints){
   return names[0] || null;
 }
 
-// Reads one file (csv or xlsx/xls) into a list of {label, header, rows}.
-// CSV goes through our own parser (utils.js) instead of the xlsx library —
-// that avoids holding the raw text AND a second SheetJS-built structure in
-// memory at the same time, which matters once a file runs past ~100MB.
+// Reads one file in a Web Worker so parsing a large CSV or workbook cannot
+// lock the page and trigger Chrome's "Page Unresponsive" dialog.
 async function parseFile(file){
   const ext = file.name.toLowerCase().split('.').pop();
-  const tables = [];
-  if(ext === 'csv' || ext === 'txt'){
-    const text = await file.text();
-    const parsed = U.parseCsv(text);
-    tables.push({label: file.name, header: parsed.header, rows: parsed.rows});
-  } else {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, {type:'array', dense:true});
-    wb.SheetNames.forEach(name => {
-      const ws = wb.Sheets[name];
-      const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
-      if(!grid.length) return;
-      const header = (grid[0] || []).map(h => String(h).trim());
-      const label = wb.SheetNames.length > 1 ? (file.name + ' › ' + name) : file.name;
-      tables.push({label, header, rows: grid.slice(1)});
-    });
-  }
-  return tables;
+  const utilsUrl = new URL('./utils.js', window.location.href).href;
+  const xlsxUrl = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+  const workerSource = `
+    importScripts(${JSON.stringify(utilsUrl)});
+    if (${JSON.stringify(ext !== 'csv' && ext !== 'txt')}) {
+      importScripts(${JSON.stringify(xlsxUrl)});
+    }
+    self.onmessage = async function(event) {
+      try {
+        const file = event.data.file;
+        const ext = event.data.ext;
+        const tables = [];
+        if(ext === 'csv' || ext === 'txt'){
+          const text = await file.text();
+          const parsed = LeadCleanUtils.parseCsv(text);
+          tables.push({label:file.name, header:parsed.header, rows:parsed.rows});
+        }else{
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, {type:'array', dense:true});
+          wb.SheetNames.forEach(function(name){
+            const ws = wb.Sheets[name];
+            const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+            if(!grid.length) return;
+            const header = (grid[0] || []).map(function(h){ return String(h).trim(); });
+            const label = wb.SheetNames.length > 1 ? (file.name + ' › ' + name) : file.name;
+            tables.push({label:label, header:header, rows:grid.slice(1)});
+          });
+        }
+        self.postMessage({ok:true, tables:tables});
+      }catch(error){
+        self.postMessage({ok:false, error:error && error.message ? error.message : String(error)});
+      }
+    };
+  `;
+
+  const blob = new Blob([workerSource], {type:'text/javascript'});
+  const workerUrl = URL.createObjectURL(blob);
+  const worker = new Worker(workerUrl);
+
+  return await new Promise((resolve,reject)=>{
+    worker.onmessage = event => {
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      if(event.data.ok) resolve(event.data.tables);
+      else reject(new Error(event.data.error));
+    };
+    worker.onerror = event => {
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      reject(new Error(event.message || 'Could not read that file'));
+    };
+    worker.postMessage({file, ext});
+  });
 }
 
 function StepBadge({n, done}){
@@ -444,7 +477,7 @@ function App(){
     }
 
     const uniqueOrder = []; const uniqueSeen = new Set();
-    let scanned = 0, unmatchedLookup = 0, invalidMobile = 0;
+    let scanned = 0, totalMobile = 0, unmatchedLookup = 0, invalidMobile = 0;
     const total = includedTables.reduce((a,t)=>a+t.rowCount,0) || 1;
     const BATCH = 3000;
 
@@ -490,6 +523,7 @@ function App(){
             if(!mobileRaw) unmatchedLookup++;
           }
           const clean = U.normalizeMobile(mobileRaw);
+          if(clean) totalMobile++;
           if(!clean && mobileRaw!==null) invalidMobile++;
 
           if(mode === 'unique'){
@@ -540,6 +574,7 @@ function App(){
     setProc({running:false, pct:100, phase:'Done', scanned, total});
     setResult({
       totalRows: scanned,
+      totalMobile,
       uniqueCount: mode==='unique' ? uniqueOrder.length : scanned,
       invalidMobile,
       unmatchedLookup: mobileMode==='lookup' ? unmatchedLookup : null,
@@ -796,6 +831,7 @@ function App(){
                 <div className="stat-tile"><div className="num">{tables.length}</div><div className="lbl">SHEETS LOADED</div></div>
                 <div className="stat-tile"><div className="num">{fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS PARSED</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : '—'}</div><div className="lbl">ROWS SCANNED</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalMobile) : '—'}</div><div className="lbl">TOTAL NUMBERS</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : '—'}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
               </div>
               <button className="cta-btn" style={{marginTop:14}} disabled={!readyToProcess} onClick={runProcess}>
