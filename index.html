@@ -152,6 +152,12 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
 .split-preview-item strong{color:var(--accent);white-space:nowrap}
 @media(max-width:520px){.split-preview-list{grid-template-columns:1fr}}
 
+.column-check-list{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto;margin-top:10px;padding-right:4px}
+.column-check-row{display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:9px;background:#fff}
+.column-check-row[data-selected="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.column-check-name{flex:1;font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.column-check-count{font-size:11px;color:var(--muted);white-space:nowrap}
+.column-check-select{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:5px 8px;border-radius:7px}
 .col-picker{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;margin-top:10px;padding-right:4px}
 .col-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;background:#f7f9fd}
 .col-item input[type="checkbox"]{width:15px;height:15px;accent-color:var(--accent)}
@@ -337,6 +343,7 @@ function App(){
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState('');
   const [fileReadProgress, setFileReadProgress] = useState({});
+  const [fileReadRows, setFileReadRows] = useState({});
   const rowsRef = useRef(new Map());
 
   const [mode, setMode] = useState('unique');
@@ -404,6 +411,8 @@ function App(){
         setFileReadProgress(p=>({...p,[newFileMetas[i].id]:0}));
         const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[newFileMetas[i].id]:pct})));
         const fileId = newFileMetas[i].id;
+        const parsedRowCount = parsed.reduce((sum,t)=>sum+(t.rows ? t.rows.length : 0),0);
+        setFileReadRows(p=>({...p,[fileId]:parsedRowCount}));
         setTables(ts => {
           const added = parsed.map((t,idx) => {
             const id = fileId+'__'+idx;
@@ -425,6 +434,7 @@ function App(){
   const removeFile = useCallback((fileId)=>{
     setFiles(fs => fs.filter(f=>f.id!==fileId));
     setFileReadProgress(p=>{const next={...p};delete next[fileId];return next;});
+    setFileReadRows(p=>{const next={...p};delete next[fileId];return next;});
     setTables(ts => {
       const keep = ts.filter(t=>t.fileId!==fileId);
       ts.filter(t=>t.fileId===fileId).forEach(t=>rowsRef.current.delete(t.id));
@@ -441,6 +451,7 @@ function App(){
       setFileReadProgress(p=>({...p,[metas[i].id]:0}));
       const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[metas[i].id]:pct})));
       const fileId = metas[i].id;
+      setFileReadRows(p=>({...p,[fileId]:parsed.reduce((sum,t)=>sum+(t.rows ? t.rows.length : 0),0)}));
       setLookupTables(ts=>{
         const added = parsed.map((t,idx)=>{
           const id = fileId+'__'+idx;
@@ -995,10 +1006,10 @@ function App(){
                   <span className="file-icon">{f.name.split('.').pop().slice(0,3).toUpperCase()}</span>
                   <div className="file-meta">
                     <div className="name">{f.name}</div>
-                    <div className="sub">{fmtBytes(f.size)} · {tables.filter(t=>t.fileId===f.id).reduce((a,t)=>a+t.rowCount,0).toLocaleString('en-IN')} rows</div>
+                    <div className="sub">{fmtBytes(f.size)} · {fmtNum(fileReadRows[f.id] ?? tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0))} rows</div>
                     {fileReadProgress[f.id] !== undefined && (
                       <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
-                        <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                        <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
                         <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                       </div>
                     )}
@@ -1016,6 +1027,25 @@ function App(){
                 </div>
               </div>
               {tables.length===0 && <p className="panel-sub">Add files above to see this.</p>}
+              {tables.length>0 && (
+                <div className="field">
+                  <label>{unionColumns.length} column(s) found across {tables.length} sheet(s)</label>
+                  <div className="column-check-list">
+                    {unionColumns.map(c=>{
+                      const selected = mobileColumn === c.name;
+                      return (
+                        <div className="column-check-row" data-selected={selected} key={c.name}>
+                          <span className="column-check-name">{c.name}</span>
+                          <span className="column-check-count">Present in {c.count}/{tables.length} sheets</span>
+                          <button type="button" className="column-check-select" onClick={()=>{setMobileMode('direct');setMobileColumn(c.name);}}>
+                            {selected ? 'Selected' : 'Select'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {tables.length>0 && problemGroups.length===0 && (
                 <p className="status-line status-good"><i></i>All {tables.length} sheet(s) share the same {unionColumns.length} columns.</p>
               )}
@@ -1084,7 +1114,7 @@ function App(){
                           <div className="sub">{fmtBytes(f.size)}</div>
                           {fileReadProgress[f.id] !== undefined && (
                             <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
-                              <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(lookupTables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                              <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? lookupTables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
                               <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                             </div>
                           )}
