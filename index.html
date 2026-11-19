@@ -144,6 +144,12 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
 .chip-radio[data-active="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 .split-row{display:flex;gap:10px;align-items:center;margin-top:10px}
 .split-row input[type="number"]{width:100px}
+.split-preview{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#f7f9fd}
+.split-preview h3{font-size:12.5px;margin-bottom:8px}
+.split-preview-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.split-preview-item{display:flex;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:8px;background:#fff;font-size:11.5px}
+.split-preview-item strong{color:var(--accent);white-space:nowrap}
+@media(max-width:520px){.split-preview-list{grid-template-columns:1fr}}
 
 .col-picker{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;margin-top:10px;padding-right:4px}
 .col-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;background:#f7f9fd}
@@ -525,6 +531,30 @@ function App(){
     : splitMode === 'parts'
       ? Math.max(1, parseInt(splitValue||'1',10))
       : Math.max(1, Math.ceil((mode==='merge' ? totalRowsParsed : uploadStats.uniqueCount) / Math.max(1, parseInt(splitValue||'1',10))));
+
+  const splitPreview = useMemo(()=>{
+    if(splitMode === 'none') return [];
+    const available = mode==='merge'
+      ? (result ? result.totalRows : totalRowsParsed)
+      : (result ? result.uniqueCount : uploadStats.uniqueCount);
+    if(splitMode === 'rows'){
+      const perFile = Math.max(1, parseInt(splitValue||'1',10));
+      const parts = [];
+      for(let start=0, index=1; start<available; start+=perFile, index++){
+        parts.push({label:'Part '+index, count:Math.min(perFile, available-start)});
+      }
+      return available > 0 ? parts : [{label:'Part 1', count:0}];
+    }
+    const partsWanted = Math.max(1, parseInt(splitValue||'1',10));
+    const perFile = U.rowsPerPart(available, partsWanted);
+    const parts = [];
+    for(let start=0, index=1; start<available; start+=perFile, index++){
+      parts.push({label:'Part '+index, count:Math.min(perFile, available-start)});
+    }
+    if(parts.length === 0) parts.push({label:'Part 1', count:0});
+    while(parts.length < partsWanted) parts.push({label:'Part '+(parts.length+1), count:0});
+    return parts.slice(0, partsWanted);
+  }, [splitMode, splitValue, mode, result, totalRowsParsed, uploadStats.uniqueCount]);
 
   function moveColumn(name, dir){
     setSelectedColumns(cols=>{
@@ -1065,6 +1095,19 @@ function App(){
                   <div className="split-row">
                     <input type="number" min="1" value={splitValue} onChange={e=>setSplitValue(parseInt(e.target.value||'1',10))} />
                     <span className="hint">{splitMode==='rows' ? 'rows in each output file' : 'roughly-equal output files'}</span>
+                  </div>
+                )}
+                {splitMode !== 'none' && (
+                  <div className="split-preview">
+                    <h3>{mode==='unique' ? 'Numbers in each part' : 'Rows in each part'}</h3>
+                    <div className="split-preview-list">
+                      {splitPreview.map(item=>(
+                        <div className="split-preview-item" key={item.label}>
+                          <span>{item.label}</span>
+                          <strong>{fmtNum(item.count)}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div className="field">
