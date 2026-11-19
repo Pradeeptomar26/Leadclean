@@ -17,6 +17,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="./utils.js"></script>
 <style>
+.login-page{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg)}
+.login-card{width:min(400px,100%);background:var(--panel);border-radius:16px;padding:32px;box-shadow:0 12px 36px #13203018}
+.login-brand{display:flex;align-items:center;gap:9px;font-size:18px;margin-bottom:28px}
+.login-card h1{font-size:28px;line-height:1.1;margin-bottom:8px}
+.login-card>p{color:var(--muted);font-size:13px;margin-bottom:18px}
+.login-error{color:var(--bad);font-size:12px;font-weight:700;margin:10px 0}
+.login-card form .cta-btn{margin-top:14px}
 /* Layout idea: sticky pill nav + hero, below it a two-column dashboard —
    a left column of always-visible wizard panels (upload, validate, configure,
    process) and a right column that stays in view with live stats, the
@@ -321,6 +328,10 @@ function App(){
   const [result, setResult] = useState(null);
   const [zipping, setZipping] = useState(false);
   const [downloadsCap, setDownloadsCap] = useState(undefined);
+  const [authenticated, setAuthenticated] = useState(()=>sessionStorage.getItem('leadclean_authenticated') === 'true');
+  const [loginMobile, setLoginMobile] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   // Two separate hosts run this same file: the Claude-hosted preview (where
   // window.claude exists and downloads must go through its "downloads"
@@ -725,6 +736,41 @@ function App(){
     }catch(e){
       pushLog('Clipboard unavailable — open this page outside the preview to download.', 'err');
     }
+  }
+
+  function handleLogin(e){
+    e.preventDefault();
+    if(loginMobile.replace(/\D/g,'') === '8920046480' && loginPassword === 'Yash@0531066'){
+      sessionStorage.setItem('leadclean_authenticated','true');
+      setAuthenticated(true);
+      setLoginError('');
+    }else{
+      setLoginError('Invalid mobile number or password.');
+    }
+  }
+
+  if(!authenticated){
+    return (
+      <main className="login-page">
+        <div className="login-card">
+          <div className="login-brand"><span className="dot"></span><strong>LeadClean</strong></div>
+          <h1>Sign in</h1>
+          <p>Enter your credentials to open LeadClean.</p>
+          <form onSubmit={handleLogin}>
+            <div className="field">
+              <label htmlFor="login-mobile">Mobile number</label>
+              <input id="login-mobile" className="text-input" type="tel" inputMode="numeric" value={loginMobile} onChange={e=>setLoginMobile(e.target.value)} autoComplete="username" required />
+            </div>
+            <div className="field">
+              <label htmlFor="login-password">Password</label>
+              <input id="login-password" className="text-input" type="password" value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} autoComplete="current-password" required />
+            </div>
+            {loginError && <p className="login-error">{loginError}</p>}
+            <button className="cta-btn" type="submit">Sign in</button>
+          </form>
+        </div>
+      </main>
+    );
   }
 
   return (
