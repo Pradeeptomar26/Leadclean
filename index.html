@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#eef3fb">
+<meta name="description" content="LeadClean merges your CSV/Excel lead files and pulls out clean, unique mobile numbers — entirely in your browser.">
+<title>LeadClean — merge leads, extract numbers</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%233f6fd1'/%3E%3Cpath d='M11 20a9 9 0 1 1 18 0 9 9 0 0 1-18 0Z' fill='none' stroke='%23fff' stroke-width='2.4'/%3E%3Cpath d='M20 15v5l3.2 3.2' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="./utils.js"></script>
+<style>
+/* Layout idea: sticky pill nav + hero, below it a two-column dashboard —
+   a left column of always-visible wizard panels (upload, validate, configure,
+   process) and a right column that stays in view with live stats, the
+   progress ring and the primary action, so it is never scrolled out of
+   reach (the one thing the old desktop app kept getting wrong). */
+:root{
+  --bg:#eef3fb;
+  --panel:#ffffff;
+  --ink:#131b2c;
+  --muted:#667085;
+  --line:#e2e8f3;
+  --accent:#3f6fd1;
+  --accent-ink:#ffffff;
+  --accent-soft:#e8eefb;
+  --good:#2f8f5b;
+  --good-soft:#e7f5ec;
+  --warn:#b9762a;
+  --warn-soft:#fbf0e1;
+  --bad:#c0433f;
+  --bad-soft:#fbeceb;
+  --font-display:'Instrument Serif', Georgia, serif;
+  --font-body:'Inter Tight', Inter, Arial, sans-serif;
+  color-scheme: light;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--font-body);
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+button:disabled{cursor:not-allowed;opacity:.45}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3,p{margin:0}
+::selection{background:var(--accent-soft)}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 24px 64px}
+
+/* --- nav --- */
+.nav-row{display:flex;justify-content:center;padding-top:18px}
+.nav{display:flex;align-items:center;gap:6px;background:var(--panel);border-radius:999px;padding:7px 8px 7px 16px;box-shadow:0 2px 14px #13203014;max-width:calc(100% - 32px)}
+.wordmark{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:-.3px;padding-right:10px}
+.wordmark .dot{width:9px;height:9px;border-radius:3px;background:var(--accent);transform:rotate(45deg)}
+.nav-links{display:flex;align-items:center;gap:3px}
+.nav-link{font-size:12px;font-weight:600;color:var(--muted);padding:9px 12px;border-radius:999px}
+.nav-link:hover{background:var(--accent-soft);color:var(--ink)}
+.nav-cta{font-size:12px;font-weight:600;background:var(--ink);color:#fff;padding:9px 15px;border-radius:999px;margin-left:4px}
+.nav-cta:hover{background:#2a3246}
+
+/* --- hero --- */
+.hero{padding:40px 4px 8px;max-width:720px}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.hero h1{font-family:var(--font-body);font-size:clamp(30px,4vw,42px);font-weight:700;letter-spacing:-1.2px;line-height:1.08;margin:12px 0 10px;text-wrap:balance}
+.hero h1 em{font-family:var(--font-display);font-style:italic;font-weight:400;color:var(--accent)}
+.hero p{font-size:15px;color:var(--muted);max-width:52ch}
+.privacy-chip{display:inline-flex;align-items:center;gap:7px;margin-top:16px;padding:7px 13px;border-radius:999px;background:var(--good-soft);color:var(--good);font-size:12px;font-weight:600}
+.privacy-chip i{width:6px;height:6px;border-radius:50%;background:var(--good)}
+
+/* --- dashboard grid --- */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start;margin-top:28px}
+.col-main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.col-side{position:sticky;top:20px;display:flex;flex-direction:column;gap:16px}
+
+.panel{background:var(--panel);border-radius:20px;padding:22px 24px;box-shadow:0 2px 16px #13203010}
+.panel[data-locked="true"]{opacity:.5}
+.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.panel-head h2{font-size:17px;font-weight:700;letter-spacing:-.3px;display:flex;align-items:center;gap:10px}
+.step-badge{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700;flex-shrink:0}
+.step-badge[data-done="true"]{background:var(--good);color:#fff}
+.panel-sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* dropzone */
+.dropzone{border:1.5px dashed var(--line);border-radius:14px;padding:26px 18px;text-align:center;transition:border-color .15s,background .15s}
+.dropzone[data-active="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.dropzone p{font-size:13px;color:var(--muted)}
+.dropzone strong{color:var(--ink)}
+.browse-btn{display:inline-flex;align-items:center;gap:7px;margin-top:12px;background:var(--accent);color:var(--accent-ink);padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600}
+.browse-btn:hover{background:#3561bb}
+
+.file-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.file-row:first-of-type{border-top:0;margin-top:14px}
+.file-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent);flex-shrink:0;font-size:11px;font-weight:700}
+.file-meta{flex:1;min-width:0}
+.file-meta .name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-meta .sub{font-size:11px;color:var(--muted)}
+.file-remove{font-size:11px;font-weight:600;color:var(--bad);padding:5px 9px;border-radius:7px}
+.file-remove:hover{background:var(--bad-soft)}
+
+/* validation */
+.status-line{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px}
+.status-line i{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.status-good i{background:var(--good)}
+.status-good{color:var(--good)}
+.status-warn i{background:var(--warn)}
+.status-warn{color:var(--warn)}
+.problem-card{margin-top:12px;border:1px solid var(--warn-soft);background:var(--warn-soft);border-radius:12px;padding:12px 14px}
+.problem-card h3{font-size:12.5px;font-weight:700;color:var(--warn)}
+.problem-card .cols{font-size:11.5px;color:#7a5620;margin:6px 0;line-height:1.6;word-break:break-word}
+.problem-card .sheets{font-size:12px;color:var(--ink)}
+.problem-card label{display:flex;align-items:center;gap:7px;font-size:12px;margin-top:8px;font-weight:600}
+
+/* form controls */
+.field{margin-top:14px}
+.field:first-child{margin-top:0}
+.field label{display:block;font-size:12px;font-weight:700;color:var(--ink);margin-bottom:6px}
+.field .hint{font-size:11px;color:var(--muted);margin-top:5px}
+select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px}
+.radio-row{display:flex;gap:8px;flex-wrap:wrap}
+.chip-radio{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:10px;padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.chip-radio[data-active="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.split-row{display:flex;gap:10px;align-items:center;margin-top:10px}
+.split-row input[type="number"]{width:100px}
+
+.col-picker{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;margin-top:10px;padding-right:4px}
+.col-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;background:#f7f9fd}
+.col-item input[type="checkbox"]{width:15px;height:15px;accent-color:var(--accent)}
+.col-item .cname{flex:1;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.col-item .ccount{font-size:10.5px;color:var(--muted)}
+.col-item .reorder{display:flex;gap:2px}
+.col-item .reorder button{width:20px;height:20px;border-radius:6px;background:#fff;border:1px solid var(--line);font-size:10px;display:grid;place-items:center}
+.picker-tools{display:flex;gap:8px;margin-top:8px}
+.picker-tools button{font-size:11.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:6px 10px;border-radius:8px}
+
+/* side column: stats + ring + cta */
+.ring-wrap{display:flex;flex-direction:column;align-items:center;text-align:center}
+.ring{position:relative;width:148px;height:148px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--accent) var(--pct,0%), var(--line) var(--pct,0%));transition:background .25s}
+.ring::before{content:'';position:absolute;inset:9px;border-radius:50%;background:var(--panel)}
+.ring-label{position:relative;font-size:27px;font-weight:700;letter-spacing:-1px}
+.ring-label small{font-size:14px;font-weight:600;color:var(--muted)}
+.ring-phase{font-size:12px;color:var(--muted);margin-top:10px;min-height:16px}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat-tile{background:#f7f9fd;border-radius:12px;padding:12px 13px}
+.stat-tile .num{font-size:21px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.stat-tile .lbl{font-size:10.5px;color:var(--muted);margin-top:3px;font-weight:600}
+
+.cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:700}
+.cta-btn:hover:not(:disabled){background:#3561bb}
+
+.log-box{background:#10172a;color:#aab6d6;border-radius:12px;padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.7;max-height:150px;overflow-y:auto}
+.log-box .line-err{color:#ff9d93}
+.log-box .line-ok{color:#8fd6ac}
+
+.output-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.output-row:first-of-type{border-top:0}
+.output-row .meta{flex:1;min-width:0}
+.output-row .meta .name{font-size:13px;font-weight:600}
+.output-row .meta .sub{font-size:11px;color:var(--muted)}
+.dl-btn{font-size:12px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:7px 12px;border-radius:8px;white-space:nowrap}
+.dl-btn:hover{background:#dbe6fa}
+.dl-btn[data-done="true"]{background:var(--good-soft);color:var(--good)}
+
+.footnote{text-align:center;font-size:11.5px;color:var(--muted);margin-top:30px}
+
+@media (max-width:860px){
+  .grid{grid-template-columns:1fr}
+  .col-side{position:static}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useRef,useMemo,useCallback,useEffect} = React;
+const U = window.LeadCleanUtils;
+
+const MOBILE_HINTS = ['mobile','phone','contact','cell','msisdn','whatsapp','number'];
+const KEY_HINTS = ['userid','user_id','id'];
+
+function fmtBytes(n){
+  if(n < 1024) return n + ' B';
+  if(n < 1024*1024) return (n/1024).toFixed(0) + ' KB';
+  return (n/1024/1024).toFixed(1) + ' MB';
+}
+function fmtNum(n){ return (n||0).toLocaleString('en-IN'); }
+function csvEscape(v){
+  const s = v === null || v === undefined ? '' : String(v);
+  if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+function guessColumn(names, hints){
+  const lower = names.map(n => n.toLowerCase());
+  for(const h of hints){
+    const i = lower.findIndex(n => n.includes(h));
+    if(i >= 0) return names[i];
+  }
+  return names[0] || null;
+}
+
+// Reads one file (csv or xlsx/xls) into a list of {label, header, rows}.
+// CSV goes through our own parser (utils.js) instead of the xlsx library —
+// that avoids holding the raw text AND a second SheetJS-built structure in
+// memory at the same time, which matters once a file runs past ~100MB.
+async function parseFile(file){
+  const ext = file.name.toLowerCase().split('.').pop();
+  const tables = [];
+  if(ext === 'csv' || ext === 'txt'){
+    const text = await file.text();
+    const parsed = U.parseCsv(text);
+    tables.push({label: file.name, header: parsed.header, rows: parsed.rows});
+  } else {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', dense:true});
+    wb.SheetNames.forEach(name => {
+      const ws = wb.Sheets[name];
+      const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+      if(!grid.length) return;
+      const header = (grid[0] || []).map(h => String(h).trim());
+      const label = wb.SheetNames.length > 1 ? (file.name + ' › ' + name) : file.name;
+      tables.push({label, header, rows: grid.slice(1)});
+    });
+  }
+  return tables;
+}
+
+function StepBadge({n, done}){
+  return <span className="step-badge" data-done={done}>{done ? '✓' : n}</span>;
+}
+
+function Dropzone({onFiles, accept, placeholder}){
+  const [active,setActive] = useState(false);
+  const inputRef = useRef(null);
+  return (
+    <div className="dropzone" data-active={active}
+      onDragOver={e=>{e.preventDefault();setActive(true);}}
+      onDragLeave={()=>setActive(false)}
+      onDrop={e=>{e.preventDefault();setActive(false);onFiles(Array.from(e.dataTransfer.files));}}>
+      <p><strong>Drag files here</strong> or browse from your computer.</p>
+      <p>{placeholder}</p>
+      <button type="button" className="browse-btn" onClick={()=>inputRef.current.click()}>Choose files ↗</button>
+      <input ref={inputRef} type="file" multiple accept={accept} style={{display:'none'}}
+        onChange={e=>{onFiles(Array.from(e.target.files)); e.target.value='';}} />
+    </div>
+  );
+}
+
+function App(){
+  const [files, setFiles] = useState([]);
+  const [tables, setTables] = useState([]);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState('');
+  const rowsRef = useRef(new Map());
+
+  const [mode, setMode] = useState('unique');
+  const [mobileMode, setMobileMode] = useState('direct');
+  const [mobileColumn, setMobileColumn] = useState('');
+  const [skippedShapes, setSkippedShapes] = useState({});
+
+  const [lookupFiles, setLookupFiles] = useState([]);
+  const [lookupTables, setLookupTables] = useState([]);
+  const lookupRowsRef = useRef(new Map());
+  const [lookupMainKey, setLookupMainKey] = useState('');
+  const [lookupKey, setLookupKey] = useState('');
+  const [lookupValue, setLookupValue] = useState('');
+
+  const [selectedColumns, setSelectedColumns] = useState([]);
+  const [splitMode, setSplitMode] = useState('none');
+  const [splitValue, setSplitValue] = useState(50000);
+
+  const [proc, setProc] = useState({running:false, pct:0, phase:'', scanned:0, total:0});
+  const [log, setLog] = useState([]);
+  const [result, setResult] = useState(null);
+  const [downloadsCap, setDownloadsCap] = useState(undefined);
+
+  // Two separate hosts run this same file: the Claude-hosted preview (where
+  // window.claude exists and downloads must go through its "downloads"
+  // capability, since a plain <a download> is refused in that sandboxed
+  // frame) and a normal site such as Cloudflare Pages (no window.claude at
+  // all, where a plain <a download> works exactly as on any other website).
+  const inArtifactHost = typeof window.claude !== 'undefined';
+  useEffect(()=>{
+    let done = false;
+    (async()=>{
+      try{
+        if(inArtifactHost && window.claude.use){
+          const d = await window.claude.use('downloads');
+          if(!done) setDownloadsCap(d);
+        } else if(!done) setDownloadsCap(null);
+      }catch(e){ if(!done) setDownloadsCap(null); }
+    })();
+    return ()=>{done=true;};
+  },[]);
+
+  function pushLog(line, kind){
+    setLog(l => [...l.slice(-60), {text:line, kind}]);
+  }
+
+  const addFiles = useCallback(async (list)=>{
+    const accepted = list.filter(f => /\.(csv|txt|xlsx|xls)$/i.test(f.name));
+    if(!accepted.length) return;
+    setParsing(true); setParseError('');
+    const newFileMetas = accepted.map(f => ({id: f.name+'_'+f.size+'_'+Date.now()+Math.random(), name:f.name, size:f.size}));
+    setFiles(fs => [...fs, ...newFileMetas]);
+    try{
+      for(let i=0;i<accepted.length;i++){
+        const parsed = await parseFile(accepted[i]);
+        const fileId = newFileMetas[i].id;
+        setTables(ts => {
+          const added = parsed.map((t,idx) => {
+            const id = fileId+'__'+idx;
+            rowsRef.current.set(id, t.rows);
+            return {id, fileId, label:t.label, header:t.header, rowCount:t.rows.length};
+          });
+          return [...ts, ...added];
+        });
+        pushLog('Parsed ' + accepted[i].name, 'ok');
+      }
+    }catch(err){
+      setParseError('Could not read that file — ' + (err.message || err));
+      pushLog('Parse error: '+(err.message||err), 'err');
+    }finally{
+      setParsing(false);
+    }
+  }, []);
+
+  const removeFile = useCallback((fileId)=>{
+    setFiles(fs => fs.filter(f=>f.id!==fileId));
+    setTables(ts => {
+      const keep = ts.filter(t=>t.fileId!==fileId);
+      ts.filter(t=>t.fileId===fileId).forEach(t=>rowsRef.current.delete(t.id));
+      return keep;
+    });
+  }, []);
+
+  const addLookupFiles = useCallback(async (list)=>{
+    const accepted = list.filter(f => /\.(csv|txt|xlsx|xls)$/i.test(f.name));
+    if(!accepted.length) return;
+    const metas = accepted.map(f => ({id:f.name+'_'+f.size+'_'+Date.now()+Math.random(), name:f.name, size:f.size}));
+    setLookupFiles(fs=>[...fs, ...metas]);
+    for(let i=0;i<accepted.length;i++){
+      const parsed = await parseFile(accepted[i]);
+      const fileId = metas[i].id;
+      setLookupTables(ts=>{
+        const added = parsed.map((t,idx)=>{
+          const id = fileId+'__'+idx;
+          lookupRowsRef.current.set(id, t.rows);
+          return {id, fileId, label:t.label, header:t.header, rowCount:t.rows.length};
+        });
+        return [...ts, ...added];
+      });
+    }
+  }, []);
+
+  const dominant = useMemo(()=> tables.length ? U.dominantShape(tables) : null, [tables]);
+  const problemGroups = useMemo(()=> tables.length && dominant ? U.groupHeaderProblems(tables, dominant) : [], [tables, dominant]);
+  const unionColumns = useMemo(()=> U.columnUnion(tables), [tables]);
+  const lookupUnion = useMemo(()=> U.columnUnion(lookupTables), [lookupTables]);
+  const totalRowsParsed = useMemo(()=> tables.reduce((a,t)=>a+t.rowCount,0), [tables]);
+
+  const includedTables = useMemo(()=>{
+    return tables.filter(t=>{
+      const shape = U.headerShape(t.header);
+      if(shape === dominant) return true;
+      return !!skippedShapes[shape];
+    });
+  }, [tables, dominant, skippedShapes]);
+
+  useEffect(()=>{
+    if(!mobileColumn && unionColumns.length){
+      const guess = guessColumn(unionColumns.map(c=>c.name), MOBILE_HINTS);
+      if(guess) setMobileColumn(guess);
+    }
+  }, [unionColumns, mobileColumn]);
+
+  useEffect(()=>{
+    if(selectedColumns.length === 0 && unionColumns.length){
+      setSelectedColumns(unionColumns.map(c=>c.name));
+    }
+  }, [unionColumns, selectedColumns.length]);
+
+  useEffect(()=>{
+    if(lookupUnion.length){
+      if(!lookupKey) setLookupKey(guessColumn(lookupUnion.map(c=>c.name), KEY_HINTS));
+      if(!lookupValue) setLookupValue(guessColumn(lookupUnion.map(c=>c.name), MOBILE_HINTS));
+    }
+    if(unionColumns.length && !lookupMainKey){
+      setLookupMainKey(guessColumn(unionColumns.map(c=>c.name), KEY_HINTS));
+    }
+  }, [lookupUnion, unionColumns]);
+
+  const readyToProcess = includedTables.length > 0 &&
+    (mobileMode === 'direct' ? !!mobileColumn : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
+    !proc.running;
+
+  function moveColumn(name, dir){
+    setSelectedColumns(cols=>{
+      const i = cols.indexOf(name);
+      const j = i+dir;
+      if(j<0 || j>=cols.length) return cols;
+      const copy = cols.slice();
+      const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
+      return copy;
+    });
+  }
+  function toggleColumn(name){
+    setSelectedColumns(cols => cols.includes(name) ? cols.filter(c=>c!==name) : [...cols, name]);
+  }
+
+  async function runProcess(){
+    setResult(null);
+    setProc({running:true, pct:2, phase:'Preparing…', scanned:0, total:totalRowsParsed||1});
+    pushLog('Starting…', 'ok');
+    await new Promise(r=>setTimeout(r,0));
+
+    let lookupMap = null;
+    if(mobileMode === 'lookup'){
+      lookupMap = new Map();
+      lookupTables.forEach(t=>{
+        const keyIdx = t.header.indexOf(lookupKey);
+        const valIdx = t.header.indexOf(lookupValue);
+        if(keyIdx<0 || valIdx<0) return;
+        const rows = lookupRowsRef.current.get(t.id) || [];
+        rows.forEach(r=>{
+          const k = U.keyText(r[keyIdx]);
+          if(!k) return;
+          if(!lookupMap.has(k)) lookupMap.set(k, r[valIdx]);
+        });
+        lookupRowsRef.current.delete(t.id); // folded into lookupMap — free the raw rows now
+      });
+      pushLog('Lookup map built: ' + fmtNum(lookupMap.size) + ' keys', 'ok');
+    }
+
+    const uniqueOrder = []; const uniqueSeen = new Set();
+    let scanned = 0, unmatchedLookup = 0, invalidMobile = 0;
+    const total = includedTables.reduce((a,t)=>a+t.rowCount,0) || 1;
+    const BATCH = 3000;
+
+    // Merge mode streams rows straight into the CURRENT output part's CSV
+    // chunks instead of collecting every row into one giant array first and
+    // splitting it afterwards — on a 450MB input that difference is holding
+    // the data twice versus once. Merge mode keeps every scanned row (no
+    // filtering), so the final row count always equals `total`, which lets
+    // the part boundaries be fixed before the scan even starts.
+    const mergeHeader = selectedColumns;
+    let mergePerFile = Infinity, mergeTotalParts = 1;
+    if(mode === 'merge' && splitMode !== 'none'){
+      mergePerFile = splitMode === 'rows' ? Math.max(1, splitValue) : U.rowsPerPart(total, Math.max(1, splitValue));
+      mergeTotalParts = Math.max(1, Math.ceil(total / mergePerFile));
+    }
+    const mergeOutputs = [];
+    let curChunks = mode === 'merge' ? [mergeHeader.map(csvEscape).join(',') + '\r\n'] : null;
+    let curRowCount = 0, curPartIdx = 0;
+    function flushMergePart(){
+      const name = mergeTotalParts > 1 ? ('merged_leads_part'+(curPartIdx+1)+'.csv') : 'merged_leads.csv';
+      const blob = new Blob(curChunks, {type:'text/csv'});
+      mergeOutputs.push({name, size: blob.size, rowCount: curRowCount, blob, saved:false});
+      curPartIdx++;
+      curChunks = [mergeHeader.map(csvEscape).join(',') + '\r\n'];
+      curRowCount = 0;
+    }
+
+    for(const t of includedTables){
+      const rows = rowsRef.current.get(t.id) || [];
+      const mobileIdx = mobileMode === 'direct' ? t.header.indexOf(mobileColumn) : -1;
+      const mainKeyIdx = mobileMode === 'lookup' ? t.header.indexOf(lookupMainKey) : -1;
+      const colIdx = mode === 'merge' ? selectedColumns.map(c => t.header.indexOf(c)) : null;
+
+      for(let i=0;i<rows.length;i+=BATCH){
+        const slice = rows.slice(i, i+BATCH);
+        for(const r of slice){
+          let mobileRaw = null;
+          if(mobileMode === 'direct'){
+            mobileRaw = mobileIdx>=0 ? r[mobileIdx] : null;
+          } else {
+            const k = mainKeyIdx>=0 ? U.keyText(r[mainKeyIdx]) : '';
+            mobileRaw = (k && lookupMap.has(k)) ? lookupMap.get(k) : null;
+            if(!mobileRaw) unmatchedLookup++;
+          }
+          const clean = U.normalizeMobile(mobileRaw);
+          if(!clean && mobileRaw!==null) invalidMobile++;
+
+          if(mode === 'unique'){
+            if(clean && !uniqueSeen.has(clean)){ uniqueSeen.add(clean); uniqueOrder.push(clean); }
+          } else {
+            const out = colIdx.map(ix => ix>=0 ? r[ix] : '');
+            curChunks.push(out.map(csvEscape).join(',') + '\r\n');
+            curRowCount++;
+            if(curRowCount >= mergePerFile) flushMergePart();
+          }
+        }
+        scanned += slice.length;
+        const pct = 5 + Math.round((scanned/total)*85);
+        setProc(p=>({...p, pct: Math.min(pct,92), phase:'Scanning ' + t.label + '…', scanned, total}));
+        await new Promise(r=>setTimeout(r,0));
+      }
+      rowsRef.current.delete(t.id); // this table is fully scanned — free it before the next one loads
+    }
+
+    pushLog('Scanned ' + fmtNum(scanned) + ' rows', 'ok');
+    setProc(p=>({...p, pct:94, phase:'Building output…'}));
+    await new Promise(r=>setTimeout(r,0));
+
+    let outputs;
+    if(mode === 'merge'){
+      if(curRowCount > 0 || mergeOutputs.length === 0) flushMergePart();
+      outputs = mergeOutputs;
+    } else {
+      const header = ['mobile'];
+      let parts;
+      if(splitMode === 'none'){
+        parts = [uniqueOrder];
+      } else {
+        const perFile = splitMode === 'rows' ? Math.max(1, splitValue) : U.rowsPerPart(uniqueOrder.length, Math.max(1, splitValue));
+        parts = [];
+        for(let i=0;i<uniqueOrder.length;i+=perFile) parts.push(uniqueOrder.slice(i, i+perFile));
+        if(parts.length === 0) parts = [[]];
+      }
+      outputs = parts.map((p, idx) => {
+        const chunks = [header.map(csvEscape).join(',') + '\r\n'];
+        p.forEach(n => chunks.push(csvEscape(n) + '\r\n'));
+        const blob = new Blob(chunks, {type:'text/csv'});
+        const name = parts.length>1 ? ('unique_mobiles_part'+(idx+1)+'.csv') : 'unique_mobiles.csv';
+        return {name, size:blob.size, rowCount:p.length, blob, saved:false};
+      });
+    }
+
+    setProc({running:false, pct:100, phase:'Done', scanned, total});
+    setResult({
+      totalRows: scanned,
+      uniqueCount: mode==='unique' ? uniqueOrder.length : scanned,
+      invalidMobile,
+      unmatchedLookup: mobileMode==='lookup' ? unmatchedLookup : null,
+      outputs,
+    });
+    pushLog('Done — ' + outputs.length + ' file(s) ready', 'ok');
+  }
+
+  function markSaved(idx){
+    setResult(r=>{
+      const outputs = r.outputs.slice();
+      outputs[idx] = {...outputs[idx], saved:true};
+      return {...r, outputs};
+    });
+  }
+
+  async function saveOutput(idx){
+    const out = result.outputs[idx];
+    if(downloadsCap){
+      try{
+        await downloadsCap.save({filename: out.name, data: out.blob});
+        markSaved(idx);
+      }catch(e){
+        pushLog('Save cancelled: ' + out.name, 'err');
+      }
+      return;
+    }
+    if(!inArtifactHost){
+      // A normal website (e.g. this same code deployed on Cloudflare Pages) —
+      // a plain browser download, exactly like any other site.
+      const url = URL.createObjectURL(out.blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = out.name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      markSaved(idx);
+      return;
+    }
+    const text = await out.blob.text();
+    try{
+      await navigator.clipboard.writeText(text);
+      pushLog('Copied ' + out.name + ' to clipboard (downloads unavailable here)', 'ok');
+    }catch(e){
+      pushLog('Clipboard unavailable — open this page outside the preview to download.', 'err');
+    }
+  }
+
+  return (
+    <div>
+      <div className="nav-row">
+        <nav className="nav">
+          <span className="wordmark"><span className="dot"></span>LeadClean</span>
+          <div className="nav-links">
+            <a className="nav-link" href="#how">How it works</a>
+            <a className="nav-link" href="#privacy">Privacy</a>
+          </div>
+          <button className="nav-cta" onClick={()=>window.location.reload()}>Start over</button>
+        </nav>
+      </div>
+
+      <div className="wrap">
+        <div className="hero">
+          <span className="eyebrow">Lead file cleanup</span>
+          <h1>Merge the files. <em>Keep the numbers.</em></h1>
+          <p>Drop in your CSV or Excel lead exports, pick which column holds the mobile number (or join it from another file), and get one clean, de-duplicated list back — split however you need it.</p>
+          <span id="privacy" className="privacy-chip"><i></i>Everything runs in this browser tab. No file is uploaded anywhere.</span>
+        </div>
+
+        <div className="grid">
+          <div className="col-main">
+
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <h2><StepBadge n="1" done={files.length>0} /> Add your files</h2>
+                  <p className="panel-sub">CSV, XLS or XLSX — multiple files and multi-sheet workbooks are both fine.</p>
+                </div>
+              </div>
+              <Dropzone onFiles={addFiles} accept=".csv,.txt,.xlsx,.xls" placeholder="CSV, XLS or XLSX, any size." />
+              {parsing && <p className="status-line status-warn"><i></i>Reading file(s)…</p>}
+              {parseError && <p className="status-line" style={{color:'var(--bad)'}}><i style={{background:'var(--bad)'}}></i>{parseError}</p>}
+              {files.map(f=>(
+                <div className="file-row" key={f.id}>
+                  <span className="file-icon">{f.name.split('.').pop().slice(0,3).toUpperCase()}</span>
+                  <div className="file-meta">
+                    <div className="name">{f.name}</div>
+                    <div className="sub">{fmtBytes(f.size)} · {tables.filter(t=>t.fileId===f.id).reduce((a,t)=>a+t.rowCount,0).toLocaleString('en-IN')} rows</div>
+                  </div>
+                  <button className="file-remove" onClick={()=>removeFile(f.id)}>Remove</button>
+                </div>
+              ))}
+            </section>
+
+            <section className="panel" data-locked={tables.length===0}>
+              <div className="panel-head">
+                <div>
+                  <h2><StepBadge n="2" done={tables.length>0 && problemGroups.length===0} /> Check the columns</h2>
+                  <p className="panel-sub">Sheets with the same columns in a different order are grouped as one issue, not repeated per sheet.</p>
+                </div>
+              </div>
+              {tables.length===0 && <p className="panel-sub">Add files above to see this.</p>}
+              {tables.length>0 && problemGroups.length===0 && (
+                <p className="status-line status-good"><i></i>All {tables.length} sheet(s) share the same {unionColumns.length} columns.</p>
+              )}
+              {tables.length>0 && problemGroups.length>0 && (
+                <>
+                  <p className="status-line status-warn"><i></i>{tables.length - problemGroups.reduce((a,g)=>a+g.labels.length,0)} of {tables.length} sheet(s) match; {problemGroups.reduce((a,g)=>a+g.labels.length,0)} don't.</p>
+                  {problemGroups.map((g,i)=>{
+                    const shape = U.headerShape(g.header);
+                    const included = !!skippedShapes[shape];
+                    return (
+                      <div className="problem-card" key={i}>
+                        <h3>{g.labels.length} sheet(s) with different columns</h3>
+                        <div className="cols">{g.header.join(', ')}</div>
+                        <div className="sheets">Affects: {g.labels.join(', ')}</div>
+                        <label>
+                          <input type="checkbox" checked={included} onChange={e=>setSkippedShapes(s=>({...s,[shape]:e.target.checked}))} />
+                          Include these anyway (columns matched by name; missing ones left blank)
+                        </label>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </section>
+
+            <section className="panel" data-locked={tables.length===0}>
+              <div className="panel-head">
+                <div>
+                  <h2><StepBadge n="3" done={readyToProcess} /> Where's the mobile number?</h2>
+                  <p className="panel-sub">Pick the column directly, or join it from a second file on a shared key.</p>
+                </div>
+              </div>
+              <div className="radio-row">
+                <button type="button" className="chip-radio" data-active={mode==='unique'} onClick={()=>setMode('unique')}>Unique numbers only</button>
+                <button type="button" className="chip-radio" data-active={mode==='merge'} onClick={()=>setMode('merge')}>Merge full rows</button>
+              </div>
+              <div className="field">
+                <div className="radio-row">
+                  <button type="button" className="chip-radio" data-active={mobileMode==='direct'} onClick={()=>setMobileMode('direct')}>It's already a column</button>
+                  <button type="button" className="chip-radio" data-active={mobileMode==='lookup'} onClick={()=>setMobileMode('lookup')}>Join from another file</button>
+                </div>
+              </div>
+
+              {mobileMode === 'direct' && (
+                <div className="field">
+                  <label>Mobile number column</label>
+                  <select value={mobileColumn} onChange={e=>setMobileColumn(e.target.value)}>
+                    <option value="">Choose a column…</option>
+                    {unionColumns.map(c=>(
+                      <option key={c.name} value={c.name}>{c.name} — in {c.count} of {tables.length} sheet(s)</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {mobileMode === 'lookup' && (
+                <>
+                  <div className="field">
+                    <label>Lookup file (has the mobile numbers)</label>
+                    <Dropzone onFiles={addLookupFiles} accept=".csv,.txt,.xlsx,.xls" placeholder="The file that holds userId/customerId + mobile." />
+                    {lookupFiles.map(f=>(
+                      <div className="file-row" key={f.id}>
+                        <span className="file-icon">{f.name.split('.').pop().slice(0,3).toUpperCase()}</span>
+                        <div className="file-meta"><div className="name">{f.name}</div><div className="sub">{fmtBytes(f.size)}</div></div>
+                      </div>
+                    ))}
+                  </div>
+                  {lookupTables.length>0 && (
+                    <>
+                      <div className="field">
+                        <label>Join key in your main files</label>
+                        <select value={lookupMainKey} onChange={e=>setLookupMainKey(e.target.value)}>
+                          {unionColumns.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Matching key in the lookup file</label>
+                        <select value={lookupKey} onChange={e=>setLookupKey(e.target.value)}>
+                          {lookupUnion.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Mobile column in the lookup file</label>
+                        <select value={lookupValue} onChange={e=>setLookupValue(e.target.value)}>
+                          {lookupUnion.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              {mode === 'merge' && unionColumns.length>0 && (
+                <div className="field">
+                  <label>Output columns &amp; order</label>
+                  <div className="picker-tools">
+                    <button type="button" onClick={()=>setSelectedColumns(unionColumns.map(c=>c.name))}>Select all</button>
+                    <button type="button" onClick={()=>setSelectedColumns([])}>Clear all</button>
+                  </div>
+                  <div className="col-picker">
+                    {unionColumns.map(c=>{
+                      const checked = selectedColumns.includes(c.name);
+                      return (
+                        <div className="col-item" key={c.name}>
+                          <input type="checkbox" checked={checked} onChange={()=>toggleColumn(c.name)} />
+                          <span className="cname">{c.name}</span>
+                          <span className="ccount">{c.count}/{tables.length}</span>
+                          {checked && (
+                            <span className="reorder">
+                              <button type="button" onClick={()=>moveColumn(c.name,-1)}>↑</button>
+                              <button type="button" onClick={()=>moveColumn(c.name,1)}>↓</button>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="field">
+                <label>Split output</label>
+                <div className="radio-row">
+                  <button type="button" className="chip-radio" data-active={splitMode==='none'} onClick={()=>setSplitMode('none')}>One file</button>
+                  <button type="button" className="chip-radio" data-active={splitMode==='rows'} onClick={()=>setSplitMode('rows')}>Rows per file</button>
+                  <button type="button" className="chip-radio" data-active={splitMode==='parts'} onClick={()=>setSplitMode('parts')}>Number of parts</button>
+                </div>
+                {splitMode !== 'none' && (
+                  <div className="split-row">
+                    <input type="number" min="1" value={splitValue} onChange={e=>setSplitValue(parseInt(e.target.value||'1',10))} />
+                    <span className="hint">{splitMode==='rows' ? 'rows in each output file' : 'roughly-equal output files'}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="panel" id="how">
+              <div className="panel-head"><div><h2>How it works</h2></div></div>
+              <p className="panel-sub">Your files are parsed and processed right here in the tab — nothing is sent to a server. This is built to handle lead files up to roughly 450MB: use Chrome for the biggest ones, close other heavy tabs first, and where you have a choice, CSV uses noticeably less memory here than the same data as XLSX.</p>
+            </section>
+          </div>
+
+          <div className="col-side">
+            <section className="panel ring-wrap">
+              <div className="ring" style={{'--pct': proc.pct+'%'}}>
+                <div className="ring-label">{proc.pct}<small>%</small></div>
+              </div>
+              <div className="ring-phase">{proc.phase || (readyToProcess ? 'Ready to process' : 'Waiting for setup…')}</div>
+            </section>
+
+            <section className="panel">
+              <div className="stat-grid">
+                <div className="stat-tile"><div className="num">{tables.length}</div><div className="lbl">SHEETS LOADED</div></div>
+                <div className="stat-tile"><div className="num">{fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS PARSED</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : '—'}</div><div className="lbl">ROWS SCANNED</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : '—'}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
+              </div>
+              <button className="cta-btn" style={{marginTop:14}} disabled={!readyToProcess} onClick={runProcess}>
+                {proc.running ? 'Processing…' : 'Process files'}
+              </button>
+              {log.length>0 && (
+                <div className="log-box" style={{marginTop:12}}>
+                  {log.map((l,i)=><div key={i} className={l.kind==='err'?'line-err':'line-ok'}>{l.text}</div>)}
+                </div>
+              )}
+            </section>
+
+            {result && (
+              <section className="panel">
+                <div className="panel-head"><div><h2>Download</h2></div></div>
+                {result.outputs.map((o,idx)=>(
+                  <div className="output-row" key={o.name}>
+                    <div className="meta">
+                      <div className="name">{o.name}</div>
+                      <div className="sub">{fmtNum(o.rowCount)} rows · {fmtBytes(o.size)}</div>
+                    </div>
+                    <button className="dl-btn" data-done={o.saved} onClick={()=>saveOutput(idx)}>
+                      {o.saved ? 'Saved ✓' : 'Download'}
+                    </button>
+                  </div>
+                ))}
+                {downloadsCap === null && <p className="panel-sub" style={{marginTop:10}}>Direct download isn't available in this preview — "Download" copies the file's contents to your clipboard instead.</p>}
+              </section>
+            )}
+          </div>
+        </div>
+
+        <p className="footnote">LeadClean · built for the team · a browser-side rebuild of the desktop Excel Data Processor</p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
