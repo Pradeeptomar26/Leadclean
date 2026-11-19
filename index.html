@@ -833,6 +833,15 @@ function App(){
     }
   }
 
+  function resetGeneratedOutput(){
+    setResult(null);
+    setProc({running:false, pct:0, phase:'', scanned:0, total:0});
+    setSplitMode('none');
+    setSplitValue('');
+    setOutputNames([]);
+    pushLog('Reset output — choose settings and process again', 'ok');
+  }
+
   async function saveOutput(idx){
     const out = result.outputs[idx];
     if(downloadsCap){
@@ -1203,7 +1212,7 @@ function App(){
                 <div className="panel-head">
                   <div><h2>Download</h2></div>
                   <div style={{display:'flex',gap:'6px',flexWrap:'wrap',justifyContent:'flex-end'}}>
-                    <button type="button" className="dl-btn" onClick={()=>window.location.reload()}>Refresh</button>
+                    <button type="button" className="dl-btn" onClick={resetGeneratedOutput}>Refresh</button>
                     <button type="button" className="dl-btn" onClick={downloadFileNameList}>Download names (XLSX)</button>
                     <button type="button" className="dl-btn" onClick={downloadAllZip} disabled={zipping}>
                       {zipping ? 'Creating ZIP…' : 'Download all (ZIP)'}
