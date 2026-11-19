@@ -315,6 +315,7 @@ function App(){
   const [splitValue, setSplitValue] = useState(50000);
 
   const [proc, setProc] = useState({running:false, pct:0, phase:'', scanned:0, total:0});
+  const [uploadStats, setUploadStats] = useState({totalMobile:0, uniqueCount:0, ready:false});
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null);
   const [zipping, setZipping] = useState(false);
@@ -419,6 +420,46 @@ function App(){
       if(guess) setMobileColumn(guess);
     }
   }, [unionColumns, mobileColumn]);
+
+  useEffect(()=>{
+    let cancelled = false;
+
+    async function previewStats(){
+      if(mobileMode !== 'direct' || !mobileColumn || includedTables.length === 0){
+        if(!cancelled) setUploadStats({totalMobile:0, uniqueCount:0, ready:false});
+        return;
+      }
+
+      const seen = new Set();
+      let totalMobile = 0;
+      const BATCH = 3000;
+
+      for(const table of includedTables){
+        if(cancelled) return;
+        const mobileIdx = table.header.indexOf(mobileColumn);
+        if(mobileIdx < 0) continue;
+        const rows = rowsRef.current.get(table.id) || [];
+
+        for(let i=0;i<rows.length;i+=BATCH){
+          if(cancelled) return;
+          const slice = rows.slice(i, i+BATCH);
+          for(const row of slice){
+            const clean = U.normalizeMobile(row[mobileIdx]);
+            if(clean){
+              totalMobile++;
+              seen.add(clean);
+            }
+          }
+          await new Promise(resolve=>setTimeout(resolve,0));
+        }
+      }
+
+      if(!cancelled) setUploadStats({totalMobile, uniqueCount:seen.size, ready:true});
+    }
+
+    previewStats();
+    return ()=>{cancelled=true;};
+  }, [includedTables, mobileMode, mobileColumn]);
 
   useEffect(()=>{
     if(selectedColumns.length === 0 && unionColumns.length){
@@ -870,8 +911,8 @@ function App(){
                 <div className="stat-tile"><div className="num">{tables.length}</div><div className="lbl">SHEETS LOADED</div></div>
                 <div className="stat-tile"><div className="num">{fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS PARSED</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : '—'}</div><div className="lbl">ROWS SCANNED</div></div>
-                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalMobile) : '—'}</div><div className="lbl">TOTAL NUMBERS</div></div>
-                <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : '—'}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalMobile) : fmtNum(uploadStats.totalMobile)}</div><div className="lbl">TOTAL NUMBERS</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : (uploadStats.ready ? fmtNum(uploadStats.uniqueCount) : '—')}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
               </div>
               <button className="cta-btn" style={{marginTop:14}} disabled={!readyToProcess} onClick={runProcess}>
                 {proc.running ? 'Processing…' : 'Process files'}
