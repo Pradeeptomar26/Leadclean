@@ -1203,6 +1203,7 @@ function App(){
                 <div className="panel-head">
                   <div><h2>Download</h2></div>
                   <div style={{display:'flex',gap:'6px',flexWrap:'wrap',justifyContent:'flex-end'}}>
+                    <button type="button" className="dl-btn" onClick={()=>window.location.reload()}>Refresh</button>
                     <button type="button" className="dl-btn" onClick={downloadFileNameList}>Download names (XLSX)</button>
                     <button type="button" className="dl-btn" onClick={downloadAllZip} disabled={zipping}>
                       {zipping ? 'Creating ZIP…' : 'Download all (ZIP)'}
