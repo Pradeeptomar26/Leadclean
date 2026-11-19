@@ -114,8 +114,9 @@ h1,h2,h3,p{margin:0}
 .file-meta{flex:1;min-width:0}
 .file-meta .name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-meta .sub{font-size:11px;color:var(--muted)}
-.file-progress{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11px;font-weight:700;color:var(--accent)}
-.file-progress-bar{height:5px;flex:1;max-width:150px;border-radius:999px;background:var(--line);overflow:hidden}
+.file-progress{display:grid;grid-template-columns:max-content minmax(90px,180px);align-items:center;gap:9px;margin-top:7px;font-size:12px;font-weight:800;color:var(--accent)}
+.file-progress[data-reading="true"]{color:var(--warn)}
+.file-progress-bar{height:7px;flex:1;width:180px;border-radius:999px;background:var(--line);overflow:hidden}
 .file-progress-bar i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .12s}
 .file-remove{font-size:11px;font-weight:600;color:var(--bad);padding:5px 9px;border-radius:7px}
 .file-remove:hover{background:var(--bad-soft)}
@@ -264,10 +265,11 @@ async function parseFile(file, onProgress){
           tables.push({label:fileName, header:parsed.header, rows:parsed.rows});
         }else{
           const buf = readData;
-          const wb = XLSX.read(buf, {type:'array', dense:true});
+          const wb = XLSX.read(buf, {type:'array', dense:true, cellFormula:false, cellHTML:false, cellStyles:false});
           wb.SheetNames.forEach(function(name){
+            self.postMessage({ok:false, progress:true, fileName:fileName, phase:'Sheet ' + name + '…'});
             const ws = wb.Sheets[name];
-            const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+            const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:'', blankrows:false});
             if(!grid.length) return;
             const header = (grid[0] || []).map(function(h){ return String(h).trim(); });
             const label = wb.SheetNames.length > 1 ? (fileName + ' › ' + name) : fileName;
@@ -287,9 +289,15 @@ async function parseFile(file, onProgress){
 
   return await new Promise((resolve,reject)=>{
     worker.onmessage = event => {
+      if(event.data.progress && event.data.phase){
+        return;
+      }
       worker.terminate();
       URL.revokeObjectURL(workerUrl);
-      if(event.data.ok) resolve(event.data.tables);
+      if(event.data.ok){
+        onProgress?.(100);
+        resolve(event.data.tables);
+      }
       else reject(new Error(event.data.error));
     };
     worker.onerror = event => {
@@ -297,7 +305,6 @@ async function parseFile(file, onProgress){
       URL.revokeObjectURL(workerUrl);
       reject(new Error(event.message || 'Could not read that file'));
     };
-    onProgress?.(100);
     const transferable = readData instanceof ArrayBuffer ? [readData] : [];
     worker.postMessage({readData, ext, fileName:file.name}, transferable);
   });
@@ -990,8 +997,8 @@ function App(){
                     <div className="name">{f.name}</div>
                     <div className="sub">{fmtBytes(f.size)} · {tables.filter(t=>t.fileId===f.id).reduce((a,t)=>a+t.rowCount,0).toLocaleString('en-IN')} rows</div>
                     {fileReadProgress[f.id] !== undefined && (
-                      <div className="file-progress">
-                        <span>{fileReadProgress[f.id] >= 100 ? 'Read 100%' : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                      <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
+                        <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
                         <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                       </div>
                     )}
@@ -1076,8 +1083,8 @@ function App(){
                           <div className="name">{f.name}</div>
                           <div className="sub">{fmtBytes(f.size)}</div>
                           {fileReadProgress[f.id] !== undefined && (
-                            <div className="file-progress">
-                              <span>{fileReadProgress[f.id] >= 100 ? 'Read 100%' : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                            <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
+                              <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(lookupTables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
                               <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                             </div>
                           )}
