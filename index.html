@@ -1143,7 +1143,7 @@ function App(){
               <div className="stat-grid">
                 <div className="stat-tile"><div className="num">{tables.length}</div><div className="lbl">SHEETS LOADED</div></div>
                 <div className="stat-tile"><div className="num">{fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS PARSED</div></div>
-                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : '—'}</div><div className="lbl">ROWS SCANNED</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS SCANNED</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalMobile) : fmtNum(uploadStats.totalMobile)}</div><div className="lbl">TOTAL NUMBERS</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : (uploadStats.ready ? fmtNum(uploadStats.uniqueCount) : '—')}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
               </div>
