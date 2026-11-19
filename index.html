@@ -19,11 +19,18 @@
 <style>
 .login-page{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg)}
 .login-card{width:min(400px,100%);background:var(--panel);border-radius:16px;padding:32px;box-shadow:0 12px 36px #13203018}
-.login-brand{display:flex;align-items:center;gap:9px;font-size:18px;margin-bottom:28px}
-.login-card h1{font-size:28px;line-height:1.1;margin-bottom:8px}
-.login-card>p{color:var(--muted);font-size:13px;margin-bottom:18px}
+.login-card .welcome-eyebrow{font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.login-card h1{font-size:30px;line-height:1.1;margin-bottom:8px}
+.login-card>p{color:var(--muted);font-size:13px;margin-bottom:22px}
+.login-card .field{margin-top:12px}
+.login-card .text-input{height:48px}
+.login-options{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;font-size:12.5px}
+.remember-option{display:flex;align-items:center;gap:8px;color:var(--ink);cursor:pointer}
+.remember-option input{width:16px;height:16px;accent-color:var(--accent)}
+.forgot-link{color:var(--accent);font-weight:700;background:none;padding:0}
 .login-error{color:var(--bad);font-size:12px;font-weight:700;margin:10px 0}
-.login-card form .cta-btn{margin-top:14px}
+.login-card form .cta-btn{margin-top:20px;height:48px}
+.login-privacy{text-align:center;margin:22px 0 0!important;font-size:11.5px!important;line-height:1.5}
 /* Layout idea: sticky pill nav + hero, below it a two-column dashboard —
    a left column of always-visible wizard panels (upload, validate, configure,
    process) and a right column that stays in view with live stats, the
@@ -69,8 +76,15 @@ h1,h2,h3,p{margin:0}
 /* --- nav --- */
 .nav-row{display:flex;justify-content:center;padding-top:18px}
 .nav{display:flex;align-items:center;gap:6px;background:var(--panel);border-radius:999px;padding:7px 8px 7px 16px;box-shadow:0 2px 14px #13203014;max-width:calc(100% - 32px)}
-.wordmark{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:-.3px;padding-right:10px}
-.wordmark .dot{width:9px;height:9px;border-radius:3px;background:var(--accent);transform:rotate(45deg)}
+.wordmark{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.3px;padding-right:10px}
+.brand-mark{position:relative;display:inline-grid;place-items:center;width:38px;height:38px;border-radius:11px;background:#4d78dc;flex-shrink:0}
+.brand-mark i{position:absolute;width:20px;height:20px;border:2.2px solid #fff;border-radius:50%;transform:rotate(-28deg)}
+.brand-mark i:last-child{width:12px;height:12px;transform:translate(4px,3px) rotate(-28deg)}
+.brand-name{font-family:var(--font-display);font-size:38px;font-weight:400;line-height:1;color:var(--ink)}
+.login-brand{display:flex;align-items:center;justify-content:center;gap:12px;margin:0 0 24px}
+.login-brand .brand-mark{width:48px;height:48px;border-radius:14px}
+.login-brand .brand-mark i{width:25px;height:25px}
+.login-brand .brand-mark i:last-child{width:15px;height:15px}
 .nav-links{display:flex;align-items:center;gap:3px}
 .nav-link{font-size:12px;font-weight:600;color:var(--muted);padding:9px 12px;border-radius:999px}
 .nav-link:hover{background:var(--accent-soft);color:var(--ink)}
@@ -240,12 +254,12 @@ function guessColumn(names, hints){
 
 // Reads one file in a Web Worker so parsing a large CSV or workbook cannot
 // lock the page and trigger Chrome's "Page Unresponsive" dialog.
-async function parseFile(file, onProgress){
+async function parseFile(file, onProgress, onBatch){
   const ext = file.name.toLowerCase().split('.').pop();
   const readData = await new Promise((resolve,reject)=>{
     const reader = new FileReader();
     reader.onprogress = event => {
-      if(event.lengthComputable) onProgress?.(Math.round((event.loaded/event.total)*100));
+      if(event.lengthComputable) onProgress?.(Math.min(95, Math.round((event.loaded/event.total)*95)));
     };
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error || new Error('Could not read file'));
@@ -268,21 +282,55 @@ async function parseFile(file, onProgress){
         if(ext === 'csv' || ext === 'txt'){
           const text = typeof readData === 'string' ? readData : new TextDecoder().decode(readData);
           const parsed = LeadCleanUtils.parseCsv(text);
-          tables.push({label:fileName, header:parsed.header, rows:parsed.rows});
+          self.postMessage({type:'sheet', sheetIndex:0, label:fileName, header:parsed.header});
+          for(let i=0;i<parsed.rows.length;i+=5000){
+            self.postMessage({type:'rows', sheetIndex:0, rows:parsed.rows.slice(i,i+5000)});
+          }
+          self.postMessage({type:'complete'});
         }else{
           const buf = readData;
-          const wb = XLSX.read(buf, {type:'array', dense:true, cellFormula:false, cellHTML:false, cellStyles:false});
-          wb.SheetNames.forEach(function(name){
-            self.postMessage({ok:false, progress:true, fileName:fileName, phase:'Sheet ' + name + '…'});
+          const wb = XLSX.read(buf, {type:'array', dense:true, cellFormula:false, cellHTML:false, cellStyles:false, sheetRows:0});
+          wb.SheetNames.forEach(function(name, sheetIndex){
+            self.postMessage({ok:false, progress:true, fileName:fileName, phase:'Analyzing sheet', percent:95 + Math.round(((sheetIndex+1)/wb.SheetNames.length)*4)});
             const ws = wb.Sheets[name];
-            const grid = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:'', blankrows:false});
+            let grid;
+            if(ws['!data']){
+              grid = ws['!data'];
+            }else{
+              const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+              const maxRows = range.e.r - range.s.r + 1;
+              const maxCols = range.e.c - range.s.c + 1;
+              grid = new Array(maxRows);
+              for(let r=0;r<maxRows;r++){
+                const outRow = new Array(maxCols);
+                for(let c=0;c<maxCols;c++){
+                  const cell = ws[XLSX.utils.encode_cell({r:r+range.s.r,c:c+range.s.c})];
+                  outRow[c] = cell ? (cell.w !== undefined ? cell.w : (cell.v !== undefined ? String(cell.v) : '')) : '';
+                }
+                grid[r] = outRow;
+              }
+            }
             if(!grid.length) return;
-            const header = (grid[0] || []).map(function(h){ return String(h).trim(); });
+            const header = (grid[0] || []).map(function(h){
+              if(h && h.w !== undefined) return String(h.w).trim();
+              if(h && h.v !== undefined) return String(h.v).trim();
+              return String(h == null ? '' : h).trim();
+            });
             const label = wb.SheetNames.length > 1 ? (fileName + ' › ' + name) : fileName;
-            tables.push({label:label, header:header, rows:grid.slice(1)});
+            self.postMessage({type:'sheet', sheetIndex:sheetIndex, label:label, header:header});
+            for(let i=1;i<grid.length;i+=5000){
+              const batch = grid.slice(i,i+5000).map(function(row){
+                return row.map(function(cell){
+                  if(cell && cell.w !== undefined) return cell.w;
+                  if(cell && cell.v !== undefined) return String(cell.v);
+                  return cell == null ? '' : String(cell);
+                });
+              });
+              self.postMessage({type:'rows', sheetIndex:sheetIndex, rows:batch});
+            }
           });
         }
-        self.postMessage({ok:true, tables:tables});
+        if(ext !== 'csv' && ext !== 'txt') self.postMessage({type:'complete'});
       }catch(error){
         self.postMessage({ok:false, error:error && error.message ? error.message : String(error)});
       }
@@ -295,7 +343,19 @@ async function parseFile(file, onProgress){
 
   return await new Promise((resolve,reject)=>{
     worker.onmessage = event => {
+      if(event.data.type === 'sheet' || event.data.type === 'rows'){
+        onBatch?.(event.data);
+        return;
+      }
+      if(event.data.type === 'complete'){
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        onProgress?.(100);
+        resolve(true);
+        return;
+      }
       if(event.data.progress && event.data.phase){
+        if(Number.isFinite(event.data.percent)) onProgress?.(event.data.percent);
         return;
       }
       worker.terminate();
@@ -314,6 +374,15 @@ async function parseFile(file, onProgress){
     const transferable = readData instanceof ArrayBuffer ? [readData] : [];
     worker.postMessage({readData, ext, fileName:file.name}, transferable);
   });
+}
+
+function Brand({wordmark=true, login=false}){
+  return (
+    <span className={login ? 'login-brand' : 'wordmark'}>
+      <span className="brand-mark" aria-label="LeadClean logo"><i></i><i></i></span>
+      {wordmark && <span className={login ? 'brand-name' : 'brand-name'} style={login ? undefined : {fontSize:'28px'}}>LeadClean</span>}
+    </span>
+  );
 }
 
 function StepBadge({n, done}){
@@ -369,10 +438,11 @@ function App(){
   const [result, setResult] = useState(null);
   const [zipping, setZipping] = useState(false);
   const [downloadsCap, setDownloadsCap] = useState(undefined);
-  const [authenticated, setAuthenticated] = useState(()=>sessionStorage.getItem('leadclean_authenticated') === 'true');
+  const [authenticated, setAuthenticated] = useState(()=>sessionStorage.getItem('leadclean_authenticated') === 'true' || localStorage.getItem('leadclean_authenticated') === 'true');
   const [loginMobile, setLoginMobile] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [rememberMe, setRememberMe] = useState(()=>localStorage.getItem('leadclean_remember_me') === 'true');
   const [failedAttempts, setFailedAttempts] = useState(()=>Number(sessionStorage.getItem('leadclean_failed_attempts') || 0));
   const [lockUntil, setLockUntil] = useState(()=>Number(sessionStorage.getItem('leadclean_lock_until') || 0));
   const [lockSeconds, setLockSeconds] = useState(()=>Math.max(0, Math.ceil((Number(sessionStorage.getItem('leadclean_lock_until') || 0)-Date.now())/1000)));
@@ -409,17 +479,20 @@ function App(){
     try{
       for(let i=0;i<accepted.length;i++){
         setFileReadProgress(p=>({...p,[newFileMetas[i].id]:0}));
-        const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[newFileMetas[i].id]:pct})));
         const fileId = newFileMetas[i].id;
-        const parsedRowCount = parsed.reduce((sum,t)=>sum+(t.rows ? t.rows.length : 0),0);
-        setFileReadRows(p=>({...p,[fileId]:parsedRowCount}));
-        setTables(ts => {
-          const added = parsed.map((t,idx) => {
-            const id = fileId+'__'+idx;
-            rowsRef.current.set(id, t.rows);
-            return {id, fileId, label:t.label, header:t.header, rowCount:t.rows.length};
-          });
-          return [...ts, ...added];
+        let parsedRowCount = 0;
+        await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[fileId]:pct})), batch=>{
+          if(batch.type === 'sheet'){
+            const id = fileId+'__'+batch.sheetIndex;
+            rowsRef.current.set(id, []);
+            setTables(ts=>[...ts, {id, fileId, label:batch.label, header:batch.header, rowCount:0}]);
+          }else if(batch.type === 'rows'){
+            const id = fileId+'__'+batch.sheetIndex;
+            parsedRowCount += batch.rows.length;
+            rowsRef.current.set(id, [...(rowsRef.current.get(id)||[]), ...batch.rows]);
+            setFileReadRows(p=>({...p,[fileId]:parsedRowCount}));
+            setTables(ts=>ts.map(t=>t.id===id ? {...t,rowCount:t.rowCount+batch.rows.length} : t));
+          }
         });
         pushLog('Parsed ' + accepted[i].name, 'ok');
       }
@@ -449,16 +522,20 @@ function App(){
     setLookupFiles(fs=>[...fs, ...metas]);
     for(let i=0;i<accepted.length;i++){
       setFileReadProgress(p=>({...p,[metas[i].id]:0}));
-      const parsed = await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[metas[i].id]:pct})));
       const fileId = metas[i].id;
-      setFileReadRows(p=>({...p,[fileId]:parsed.reduce((sum,t)=>sum+(t.rows ? t.rows.length : 0),0)}));
-      setLookupTables(ts=>{
-        const added = parsed.map((t,idx)=>{
-          const id = fileId+'__'+idx;
-          lookupRowsRef.current.set(id, t.rows);
-          return {id, fileId, label:t.label, header:t.header, rowCount:t.rows.length};
-        });
-        return [...ts, ...added];
+      let parsedRowCount = 0;
+      await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[fileId]:pct})), batch=>{
+        if(batch.type === 'sheet'){
+          const id = fileId+'__'+batch.sheetIndex;
+          lookupRowsRef.current.set(id, []);
+          setLookupTables(ts=>[...ts, {id, fileId, label:batch.label, header:batch.header, rowCount:0}]);
+        }else if(batch.type === 'rows'){
+          const id = fileId+'__'+batch.sheetIndex;
+          parsedRowCount += batch.rows.length;
+          lookupRowsRef.current.set(id,[...(lookupRowsRef.current.get(id)||[]),...batch.rows]);
+          setFileReadRows(p=>({...p,[fileId]:parsedRowCount}));
+          setLookupTables(ts=>ts.map(t=>t.id===id ? {...t,rowCount:t.rowCount+batch.rows.length} : t));
+        }
       });
     }
   }, []);
@@ -920,6 +997,13 @@ function App(){
     }
     if(loginMobile.replace(/\D/g,'') === '8920046480' && loginPassword === 'Yash@0531066'){
       sessionStorage.setItem('leadclean_authenticated','true');
+      if(rememberMe){
+        localStorage.setItem('leadclean_authenticated','true');
+        localStorage.setItem('leadclean_remember_me','true');
+      }else{
+        localStorage.removeItem('leadclean_authenticated');
+        localStorage.removeItem('leadclean_remember_me');
+      }
       sessionStorage.removeItem('leadclean_failed_attempts');
       sessionStorage.removeItem('leadclean_lock_until');
       setAuthenticated(true);
@@ -944,20 +1028,29 @@ function App(){
     return (
       <main className="login-page">
         <div className="login-card">
-          <div className="login-brand"><span className="dot"></span><strong>LeadClean</strong></div>
+          <Brand wordmark={true} login={true} />
+          <div className="welcome-eyebrow">Welcome back</div>
           <h1>Sign in</h1>
           <p>Enter your credentials to open LeadClean.</p>
           <form onSubmit={handleLogin}>
             <div className="field">
               <label htmlFor="login-mobile">Mobile number</label>
-              <input id="login-mobile" className="text-input" type="tel" inputMode="numeric" value={loginMobile} onChange={e=>setLoginMobile(e.target.value)} autoComplete="username" required />
+              <input id="login-mobile" className="text-input" type="tel" inputMode="numeric" placeholder="98XXXXXXXX" value={loginMobile} onChange={e=>setLoginMobile(e.target.value)} autoComplete="username" required />
             </div>
             <div className="field">
               <label htmlFor="login-password">Password</label>
               <input id="login-password" className="text-input" type="password" value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} autoComplete="current-password" required />
             </div>
+            <div className="login-options">
+              <label className="remember-option">
+                <input type="checkbox" checked={rememberMe} onChange={e=>setRememberMe(e.target.checked)} />
+                <span>Remember me</span>
+              </label>
+              <button type="button" className="forgot-link" onClick={()=>setLoginError('Password recovery is unavailable. Contact the administrator.')}>Forgot password?</button>
+            </div>
             {loginError && <p className="login-error">{lockSeconds > 0 ? 'Try again ' + lockSeconds + ' seconds later.' : loginError}</p>}
             <button className="cta-btn" type="submit" disabled={lockSeconds > 0}>{lockSeconds > 0 ? 'Try again in ' + lockSeconds + 's' : 'Sign in'}</button>
+            <p className="login-privacy">Everything runs in this browser tab. No file is uploaded anywhere.</p>
           </form>
         </div>
       </main>
@@ -968,14 +1061,14 @@ function App(){
     <div>
       <div className="nav-row">
         <nav className="nav">
-          <span className="wordmark"><span className="dot"></span>LeadClean</span>
+          <Brand wordmark={true} />
           <div className="nav-links">
             <a className="nav-link" href="#how">How it works</a>
             <a className="nav-link" href="#privacy">Privacy</a>
           </div>
           <div className="nav-actions">
             <button className="nav-cta" onClick={()=>window.location.reload()}>Start over</button>
-            <button className="nav-cta" onClick={()=>{sessionStorage.removeItem('leadclean_authenticated'); setAuthenticated(false);}}>Sign out</button>
+            <button className="nav-cta" onClick={()=>{sessionStorage.removeItem('leadclean_authenticated'); localStorage.removeItem('leadclean_authenticated'); setAuthenticated(false);}}>Sign out</button>
           </div>
         </nav>
       </div>
@@ -1009,7 +1102,7 @@ function App(){
                     <div className="sub">{fmtBytes(f.size)} · {fmtNum(fileReadRows[f.id] ?? tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0))} rows</div>
                     {fileReadProgress[f.id] !== undefined && (
                       <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
-                        <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                        <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? tables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : (fileReadProgress[f.id] >= 95 ? 'Analyzing file… ' : 'Reading ' + fileReadProgress[f.id] + '%')}</span>
                         <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                       </div>
                     )}
@@ -1114,7 +1207,7 @@ function App(){
                           <div className="sub">{fmtBytes(f.size)}</div>
                           {fileReadProgress[f.id] !== undefined && (
                             <div className="file-progress" data-reading={fileReadProgress[f.id] < 100}>
-                              <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? lookupTables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : 'Reading ' + fileReadProgress[f.id] + '%'}</span>
+                              <span>{fileReadProgress[f.id] >= 100 ? ('Read 100% · ' + fmtNum(fileReadRows[f.id] ?? lookupTables.filter(t=>t.fileId===f.id).reduce((sum,t)=>sum+t.rowCount,0)) + ' rows') : (fileReadProgress[f.id] >= 95 ? 'Analyzing file… ' : 'Reading ' + fileReadProgress[f.id] + '%')}</span>
                               <span className="file-progress-bar"><i style={{width:fileReadProgress[f.id]+'%'}}></i></span>
                             </div>
                           )}
