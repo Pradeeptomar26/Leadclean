@@ -346,7 +346,7 @@ function App(){
 
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [splitMode, setSplitMode] = useState('none');
-  const [splitValue, setSplitValue] = useState(50000);
+  const [splitValue, setSplitValue] = useState('');
   const [outputNames, setOutputNames] = useState([]);
 
   const [proc, setProc] = useState({running:false, pct:0, phase:'', scanned:0, total:0});
@@ -1093,7 +1093,7 @@ function App(){
                 </div>
                 {splitMode !== 'none' && (
                   <div className="split-row">
-                    <input type="number" min="1" value={splitValue} onChange={e=>setSplitValue(parseInt(e.target.value||'1',10))} />
+                    <input type="number" min="1" value={splitValue} placeholder="Enter value" onChange={e=>setSplitValue(e.target.value)} />
                     <span className="hint">{splitMode==='rows' ? 'rows in each output file' : 'roughly-equal output files'}</span>
                   </div>
                 )}
