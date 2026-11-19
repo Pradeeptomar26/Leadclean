@@ -181,7 +181,10 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
 .dl-btn:hover{background:#dbe6fa}
 .dl-btn[data-done="true"]{background:var(--good-soft);color:var(--good)}
 
-.footnote{text-align:center;font-size:11.5px;color:var(--muted);margin-top:30px}
+.footnote{overflow:hidden;width:100%;margin-top:30px;padding:12px 0;font-size:20px;font-weight:800;letter-spacing:0}
+.creator-credit{display:inline-block;white-space:nowrap;background:linear-gradient(90deg,#2563eb,#ea580c,#16a34a,#7c3aed);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:creator-scroll 10s linear infinite alternate,creator-color 4s linear infinite}
+@keyframes creator-scroll{from{transform:translateX(-18%)}to{transform:translateX(18%)}}
+@keyframes creator-color{from{background-position:0 50%}to{background-position:200% 50%}}
 
 @media (max-width:860px){
   .grid{grid-template-columns:1fr}
@@ -333,6 +336,9 @@ function App(){
   const [loginMobile, setLoginMobile] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [failedAttempts, setFailedAttempts] = useState(()=>Number(sessionStorage.getItem('leadclean_failed_attempts') || 0));
+  const [lockUntil, setLockUntil] = useState(()=>Number(sessionStorage.getItem('leadclean_lock_until') || 0));
+  const [lockSeconds, setLockSeconds] = useState(()=>Math.max(0, Math.ceil((Number(sessionStorage.getItem('leadclean_lock_until') || 0)-Date.now())/1000)));
 
   // Two separate hosts run this same file: the Claude-hosted preview (where
   // window.claude exists and downloads must go through its "downloads"
@@ -739,14 +745,48 @@ function App(){
     }
   }
 
+  useEffect(()=>{
+    if(lockSeconds <= 0) return;
+    const timer = setInterval(()=>{
+      const remaining = Math.max(0, Math.ceil((lockUntil-Date.now())/1000));
+      setLockSeconds(remaining);
+      if(remaining <= 0){
+        clearInterval(timer);
+        setFailedAttempts(0);
+        setLockUntil(0);
+        sessionStorage.removeItem('leadclean_failed_attempts');
+        sessionStorage.removeItem('leadclean_lock_until');
+        setLoginError('');
+      }
+    },250);
+    return ()=>clearInterval(timer);
+  }, [lockUntil, lockSeconds]);
+
   function handleLogin(e){
     e.preventDefault();
+    if(Date.now() < lockUntil){
+      setLoginError('Try again ' + Math.ceil((lockUntil-Date.now())/1000) + ' seconds later.');
+      return;
+    }
     if(loginMobile.replace(/\D/g,'') === '8920046480' && loginPassword === 'Yash@0531066'){
       sessionStorage.setItem('leadclean_authenticated','true');
+      sessionStorage.removeItem('leadclean_failed_attempts');
+      sessionStorage.removeItem('leadclean_lock_until');
       setAuthenticated(true);
       setLoginError('');
     }else{
-      setLoginError('Invalid mobile number or password.');
+      const attempts = failedAttempts + 1;
+      setFailedAttempts(attempts);
+      sessionStorage.setItem('leadclean_failed_attempts', String(attempts));
+      if(attempts >= 3){
+        const until = Date.now()+30000;
+        setLockUntil(until);
+        setLockSeconds(30);
+        sessionStorage.setItem('leadclean_lock_until', String(until));
+        setLoginError('Try again 30 seconds later.');
+      }else{
+        setLoginError('Invalid mobile number or password. ' + (3-attempts) + ' attempt(s) remaining.');
+      }
     }
   }
 
@@ -766,8 +806,8 @@ function App(){
               <label htmlFor="login-password">Password</label>
               <input id="login-password" className="text-input" type="password" value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} autoComplete="current-password" required />
             </div>
-            {loginError && <p className="login-error">{loginError}</p>}
-            <button className="cta-btn" type="submit">Sign in</button>
+            {loginError && <p className="login-error">{lockSeconds > 0 ? 'Try again ' + lockSeconds + ' seconds later.' : loginError}</p>}
+            <button className="cta-btn" type="submit" disabled={lockSeconds > 0}>{lockSeconds > 0 ? 'Try again in ' + lockSeconds + 's' : 'Sign in'}</button>
           </form>
         </div>
       </main>
@@ -1041,7 +1081,7 @@ function App(){
           </div>
         </div>
 
-        <p className="footnote">LeadClean · Created By Pradeep Tomar · a browser-side rebuild of the desktop Excel Data Processor</p>
+        <p className="footnote" role="note"><span className="creator-credit">Created By Pradeep Tomar</span></p>
       </div>
     </div>
   );
