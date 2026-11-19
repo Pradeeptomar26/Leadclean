@@ -313,6 +313,7 @@ function App(){
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [splitMode, setSplitMode] = useState('none');
   const [splitValue, setSplitValue] = useState(50000);
+  const [outputNames, setOutputNames] = useState([]);
 
   const [proc, setProc] = useState({running:false, pct:0, phase:'', scanned:0, total:0});
   const [uploadStats, setUploadStats] = useState({totalMobile:0, uniqueCount:0, ready:false});
@@ -481,6 +482,12 @@ function App(){
     (mobileMode === 'direct' ? !!mobileColumn : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
     !proc.running;
 
+  const splitPartCount = splitMode === 'none'
+    ? 1
+    : splitMode === 'parts'
+      ? Math.max(1, parseInt(splitValue||'1',10))
+      : Math.max(1, Math.ceil((mode==='merge' ? totalRowsParsed : uploadStats.uniqueCount) / Math.max(1, parseInt(splitValue||'1',10))));
+
   function moveColumn(name, dir){
     setSelectedColumns(cols=>{
       const i = cols.indexOf(name);
@@ -493,6 +500,20 @@ function App(){
   }
   function toggleColumn(name){
     setSelectedColumns(cols => cols.includes(name) ? cols.filter(c=>c!==name) : [...cols, name]);
+  }
+
+  function cleanOutputName(name, fallback, index){
+    const trimmed = String(name || '').trim();
+    const withBase = trimmed || fallback;
+    return (withBase.toLowerCase().endsWith('.csv') ? withBase : withBase + '.csv').replace(/[\\/:*?"<>|]/g, '-');
+  }
+
+  function setOutputName(index, value){
+    setOutputNames(names => {
+      const next = names.slice();
+      next[index] = value;
+      return next;
+    });
   }
 
   async function runProcess(){
@@ -593,7 +614,10 @@ function App(){
     let outputs;
     if(mode === 'merge'){
       if(curRowCount > 0 || mergeOutputs.length === 0) flushMergePart();
-      outputs = mergeOutputs;
+      outputs = mergeOutputs.map((out, idx) => {
+        const fallback = mergeOutputs.length > 1 ? ('merged_leads_part'+(idx+1)+'.csv') : 'merged_leads.csv';
+        return {...out, name:cleanOutputName(outputNames[idx], fallback, idx)};
+      });
     } else {
       const header = ['mobile'];
       let parts;
@@ -609,7 +633,8 @@ function App(){
         const chunks = [header.map(csvEscape).join(',') + '\r\n'];
         p.forEach(n => chunks.push(csvEscape(n) + '\r\n'));
         const blob = new Blob(chunks, {type:'text/csv'});
-        const name = parts.length>1 ? ('unique_mobiles_part'+(idx+1)+'.csv') : 'unique_mobiles.csv';
+        const fallback = parts.length>1 ? ('unique_mobiles_part'+(idx+1)+'.csv') : 'unique_mobiles.csv';
+        const name = cleanOutputName(outputNames[idx], fallback, idx);
         return {name, size:blob.size, rowCount:p.length, blob, saved:false};
       });
     }
@@ -889,6 +914,23 @@ function App(){
                     <span className="hint">{splitMode==='rows' ? 'rows in each output file' : 'roughly-equal output files'}</span>
                   </div>
                 )}
+                <div className="field">
+                    <label>Output filenames</label>
+                    {Array.from({length: splitPartCount}).map((_,idx)=>{
+                      const prefix = mode==='merge' ? 'merged_leads_part' : 'unique_mobiles_part';
+                      const placeholder = prefix + (idx+1);
+                      return (
+                        <input
+                          key={idx}
+                          className="text-input"
+                          style={{marginTop:idx===0 ? 0 : 8}}
+                          value={outputNames[idx] || ''}
+                          placeholder={placeholder + '.csv'}
+                          onChange={e=>setOutputName(idx,e.target.value)}
+                        />
+                      );
+                    })}
+                  </div>
               </div>
             </section>
 
