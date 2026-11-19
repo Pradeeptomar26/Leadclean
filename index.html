@@ -14,6 +14,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="./utils.js"></script>
 <style>
 /* Layout idea: sticky pill nav + hero, below it a two-column dashboard —
@@ -316,6 +317,7 @@ function App(){
   const [proc, setProc] = useState({running:false, pct:0, phase:'', scanned:0, total:0});
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null);
+  const [zipping, setZipping] = useState(false);
   const [downloadsCap, setDownloadsCap] = useState(undefined);
 
   // Two separate hosts run this same file: the Claude-hosted preview (where
@@ -591,6 +593,43 @@ function App(){
     });
   }
 
+  async function downloadAllZip(){
+    if(!result || zipping) return;
+    if(typeof JSZip === 'undefined'){
+      pushLog('ZIP download unavailable — refresh and try again', 'err');
+      return;
+    }
+
+    setZipping(true);
+    try{
+      const zip = new JSZip();
+      result.outputs.forEach(out => zip.file(out.name, out.blob));
+      const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE'});
+      const zipName = 'leadclean_results.zip';
+
+      if(downloadsCap){
+        await downloadsCap.save({filename:zipName, data:blob});
+      }else if(!inArtifactHost){
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = zipName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      }else{
+        pushLog('ZIP download unavailable in this preview', 'err');
+        return;
+      }
+      pushLog('Downloaded ' + result.outputs.length + ' file(s) as ZIP', 'ok');
+    }catch(e){
+      pushLog('Could not create ZIP: ' + (e.message || e), 'err');
+    }finally{
+      setZipping(false);
+    }
+  }
+
   async function saveOutput(idx){
     const out = result.outputs[idx];
     if(downloadsCap){
@@ -846,7 +885,12 @@ function App(){
 
             {result && (
               <section className="panel">
-                <div className="panel-head"><div><h2>Download</h2></div></div>
+                <div className="panel-head">
+                  <div><h2>Download</h2></div>
+                  <button type="button" className="dl-btn" onClick={downloadAllZip} disabled={zipping}>
+                    {zipping ? 'Creating ZIP…' : 'Download all (ZIP)'}
+                  </button>
+                </div>
                 {result.outputs.map((o,idx)=>(
                   <div className="output-row" key={o.name}>
                     <div className="meta">
