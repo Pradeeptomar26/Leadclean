@@ -767,7 +767,11 @@ function App(){
       const zip = new JSZip();
       result.outputs.forEach(out => zip.file(out.name, out.blob));
       const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE'});
-      const zipName = 'leadclean_results.zip';
+      let zipBase = String(outputNames[0] || '').trim();
+      if(!zipBase) zipBase = mode==='merge' ? 'merged_leads' : 'unique_mobiles';
+      zipBase = zipBase.replace(/\.csv$/i,'').replace(/[\\/:*?"<>|]/g,'-');
+      zipBase = zipBase.replace(/(?:_|-)(\d+)$/, '');
+      const zipName = zipBase + '.zip';
 
       if(downloadsCap){
         await downloadsCap.save({filename:zipName, data:blob});
