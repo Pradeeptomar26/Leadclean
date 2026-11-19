@@ -792,6 +792,47 @@ function App(){
     }
   }
 
+  async function downloadFileNameList(){
+    if(!result || typeof XLSX === 'undefined'){
+      pushLog('Excel download unavailable — refresh and try again', 'err');
+      return;
+    }
+
+    try{
+      const rows = [['File Name']];
+      result.outputs.forEach(out=>{
+        const name = out.name.replace(/\.csv$/i,'');
+        rows.push([name]);
+      });
+
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      worksheet['!cols'] = [{wch:50}];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'File Names');
+      const wbout = XLSX.write(workbook, {bookType:'xlsx', type:'array'});
+      const blob = new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+      if(downloadsCap){
+        await downloadsCap.save({filename:'output_file_names.xlsx', data:blob});
+      }else if(!inArtifactHost){
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'output_file_names.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),4000);
+      }else{
+        pushLog('Excel download unavailable in this preview', 'err');
+        return;
+      }
+      pushLog('Downloaded output filename list', 'ok');
+    }catch(e){
+      pushLog('Could not create filename XLSX: ' + (e.message || e), 'err');
+    }
+  }
+
   async function saveOutput(idx){
     const out = result.outputs[idx];
     if(downloadsCap){
@@ -1161,9 +1202,12 @@ function App(){
               <section className="panel">
                 <div className="panel-head">
                   <div><h2>Download</h2></div>
-                  <button type="button" className="dl-btn" onClick={downloadAllZip} disabled={zipping}>
-                    {zipping ? 'Creating ZIP…' : 'Download all (ZIP)'}
-                  </button>
+                  <div style={{display:'flex',gap:'6px',flexWrap:'wrap',justifyContent:'flex-end'}}>
+                    <button type="button" className="dl-btn" onClick={downloadFileNameList}>Download names (XLSX)</button>
+                    <button type="button" className="dl-btn" onClick={downloadAllZip} disabled={zipping}>
+                      {zipping ? 'Creating ZIP…' : 'Download all (ZIP)'}
+                    </button>
+                  </div>
                 </div>
                 {result.outputs.map((o,idx)=>(
                   <div className="output-row" key={o.name}>
