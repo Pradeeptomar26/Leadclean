@@ -597,7 +597,7 @@ function App(){
     let cancelled = false;
 
     async function previewStats(){
-      if(mobileMode !== 'direct' || !mobileColumn || includedTables.length === 0){
+      if(mobileMode !== 'direct' || !mobileColumn || tables.length === 0){
         if(!cancelled) setUploadStats({totalMobile:0, uniqueCount:0, ready:false});
         return;
       }
@@ -606,7 +606,7 @@ function App(){
       let totalMobile = 0;
       const BATCH = 3000;
 
-      for(const table of includedTables){
+      for(const table of tables){
         if(cancelled) return;
         const mobileIdx = table.header.indexOf(mobileColumn);
         if(mobileIdx < 0) continue;
@@ -631,7 +631,7 @@ function App(){
 
     previewStats();
     return ()=>{cancelled=true;};
-  }, [includedTables, mobileMode, mobileColumn]);
+  }, [tables, mobileMode, mobileColumn]);
 
   useEffect(()=>{
     if(selectedColumns.length === 0 && unionColumns.length){
@@ -1361,7 +1361,7 @@ function App(){
                 <div className="stat-tile"><div className="num">{fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS PARSED</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalRows) : fmtNum(totalRowsParsed)}</div><div className="lbl">ROWS SCANNED</div></div>
                 <div className="stat-tile"><div className="num">{result ? fmtNum(result.totalMobile) : fmtNum(uploadStats.totalMobile)}</div><div className="lbl">TOTAL NUMBERS</div></div>
-                <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : (uploadStats.ready ? fmtNum(uploadStats.uniqueCount) : '—')}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
+                <div className="stat-tile"><div className="num">{result ? fmtNum(result.uniqueCount) : fmtNum(uploadStats.uniqueCount)}</div><div className="lbl">{mode==='unique' ? 'UNIQUE NUMBERS' : 'OUTPUT ROWS'}</div></div>
               </div>
               <button className="cta-btn" style={{marginTop:14}} disabled={!readyToProcess} onClick={runProcess}>
                 {proc.running ? 'Processing…' : 'Process files'}
