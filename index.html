@@ -695,7 +695,7 @@ function App(){
   }, [lookupUnion, unionColumns]);
 
   const readyToProcess = includedTables.length > 0 &&
-    (mobileMode === 'direct' ? !!mobileColumn : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
+    (mobileMode === 'direct' ? (unionColumns.length>0 || !!mobileColumn) : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
     !proc.running;
 
   const splitPartCount = splitMode === 'none'
@@ -808,6 +808,22 @@ function App(){
       pushLog('Lookup map built: ' + fmtNum(lookupMap.size) + ' keys', 'ok');
     }
 
+    let resolvedMobileColumn = mobileColumn;
+    if(mobileMode === 'direct' && !resolvedMobileColumn){
+      let bestName = '';
+      let bestCount = -1;
+      for(const table of includedTables){
+        table.header.forEach((name,idx)=>{
+          let count = 0;
+          const rows = rowsRef.current.get(table.id)||[];
+          for(const row of rows){ if(U.normalizeMobile(row[idx])) count++; }
+          if(count>bestCount){bestCount=count;bestName=name;}
+        });
+      }
+      resolvedMobileColumn = bestName;
+      if(resolvedMobileColumn){setMobileColumn(resolvedMobileColumn);}
+    }
+
     const uniqueOrder = []; const uniqueSeen = new Set();
     let scanned = 0, totalMobile = 0, unmatchedLookup = 0, invalidMobile = 0;
     const total = includedTables.reduce((a,t)=>a+t.rowCount,0) || 1;
@@ -839,7 +855,7 @@ function App(){
 
     for(const t of includedTables){
       const rows = rowsRef.current.get(t.id) || [];
-      const mobileIdx = mobileMode === 'direct' ? t.header.indexOf(mobileColumn) : -1;
+      const mobileIdx = mobileMode === 'direct' ? t.header.indexOf(resolvedMobileColumn) : -1;
       const mainKeyIdx = mobileMode === 'lookup' ? t.header.indexOf(lookupMainKey) : -1;
       const colIdx = mode === 'merge' ? selectedColumns.map(c => t.header.indexOf(c)) : null;
 
