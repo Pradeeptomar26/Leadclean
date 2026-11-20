@@ -414,6 +414,10 @@ function App(){
   const [fileReadProgress, setFileReadProgress] = useState({});
   const [fileReadRows, setFileReadRows] = useState({});
   const rowsRef = useRef(new Map());
+  const mobileColumnRef = useRef('');
+  const liveSheetHeadersRef = useRef(new Map());
+  const liveMobileSeenRef = useRef(new Set());
+  const liveMobileTotalRef = useRef(0);
 
   const [mode, setMode] = useState('unique');
   const [mobileMode, setMobileMode] = useState('direct');
@@ -476,6 +480,9 @@ function App(){
     setParsing(true); setParseError('');
     const newFileMetas = accepted.map(f => ({id: f.name+'_'+f.size+'_'+Date.now()+Math.random(), name:f.name, size:f.size}));
     setFiles(fs => [...fs, ...newFileMetas]);
+    liveMobileSeenRef.current = new Set();
+    liveMobileTotalRef.current = 0;
+    setUploadStats({totalMobile:0, uniqueCount:0, ready:false});
     try{
       for(let i=0;i<accepted.length;i++){
         setFileReadProgress(p=>({...p,[newFileMetas[i].id]:0}));
@@ -484,11 +491,34 @@ function App(){
         await parseFile(accepted[i], pct=>setFileReadProgress(p=>({...p,[fileId]:pct})), batch=>{
           if(batch.type === 'sheet'){
             const id = fileId+'__'+batch.sheetIndex;
+            liveSheetHeadersRef.current.set(id, batch.header);
+            if(!mobileColumnRef.current){
+              const guessed = guessColumn(batch.header, MOBILE_HINTS);
+              if(guessed){ mobileColumnRef.current = guessed; setMobileColumn(guessed); }
+            }
             rowsRef.current.set(id, []);
             setTables(ts=>[...ts, {id, fileId, label:batch.label, header:batch.header, rowCount:0}]);
           }else if(batch.type === 'rows'){
             const id = fileId+'__'+batch.sheetIndex;
             parsedRowCount += batch.rows.length;
+            if(mobileMode === 'direct'){
+              const header = liveSheetHeadersRef.current.get(id) || [];
+              const mobileIdx = header.indexOf(mobileColumnRef.current);
+              if(mobileIdx >= 0){
+                batch.rows.forEach(row=>{
+                  const clean = U.normalizeMobile(row[mobileIdx]);
+                  if(clean){
+                    liveMobileTotalRef.current++;
+                    liveMobileSeenRef.current.add(clean);
+                  }
+                });
+                setUploadStats({
+                  totalMobile:liveMobileTotalRef.current,
+                  uniqueCount:liveMobileSeenRef.current.size,
+                  ready:true,
+                });
+              }
+            }
             rowsRef.current.set(id, [...(rowsRef.current.get(id)||[]), ...batch.rows]);
             setFileReadRows(p=>({...p,[fileId]:parsedRowCount}));
             setTables(ts=>ts.map(t=>t.id===id ? {...t,rowCount:t.rowCount+batch.rows.length} : t));
@@ -553,6 +583,8 @@ function App(){
       return !!skippedShapes[shape];
     });
   }, [tables, dominant, skippedShapes]);
+
+  useEffect(()=>{mobileColumnRef.current = mobileColumn;}, [mobileColumn]);
 
   useEffect(()=>{
     if(!mobileColumn && unionColumns.length){
