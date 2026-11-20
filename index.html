@@ -266,7 +266,7 @@ async function parseFile(file, onProgress, onBatch){
     if(ext === 'csv' || ext === 'txt') reader.readAsText(file);
     else reader.readAsArrayBuffer(file);
   });
-  const utilsUrl = new URL('./utils.js', window.location.href).href;
+  const utilsUrl = new URL('./utils.js', window.location.href).href + '?v=' + Date.now();
   const xlsxUrl = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
   const workerSource = `
     importScripts(${JSON.stringify(utilsUrl)});
@@ -281,10 +281,27 @@ async function parseFile(file, onProgress, onBatch){
         const tables = [];
         if(ext === 'csv' || ext === 'txt'){
           const text = typeof readData === 'string' ? readData : new TextDecoder().decode(readData);
-          const parsed = LeadCleanUtils.parseCsv(text);
+          var parsed = LeadCleanUtils.parseCsv(text);
+          var rows = parsed.rows;
+          if(parsed.header.length <= 1 && rows.length){
+            var headerRow = parsed.header;
+            var hintPattern = /mobile|phone|contact|cell|msisdn|whatsapp|number/i;
+            var sourceRows = rows.slice(0,100);
+            var best=-1,bestIdx=0,bestFilled=0;
+            sourceRows.forEach(function(row,idx){
+              var filled=row.filter(function(v){return String(v||'').trim()!==''}).length;
+              var hints=row.filter(function(v){return hintPattern.test(String(v||''))}).length;
+              var score=hints*10+filled;
+              if(score>best){best=score;bestIdx=idx;bestFilled=filled;}
+            });
+            if(best>=10 && sourceRows[bestIdx]){
+              parsed.header=sourceRows[bestIdx].map(function(v){return String(v||'').trim();});
+              rows=rows.slice(bestIdx+1);
+            }
+          }
           self.postMessage({type:'sheet', sheetIndex:0, label:fileName, header:parsed.header});
-          for(let i=0;i<parsed.rows.length;i+=5000){
-            self.postMessage({type:'rows', sheetIndex:0, rows:parsed.rows.slice(i,i+5000)});
+          for(let i=0;i<rows.length;i+=5000){
+            self.postMessage({type:'rows', sheetIndex:0, rows:rows.slice(i,i+5000)});
           }
           self.postMessage({type:'complete'});
         }else{
@@ -311,14 +328,30 @@ async function parseFile(file, onProgress, onBatch){
               }
             }
             if(!grid.length) return;
-            const header = (grid[0] || []).map(function(h){
+            let headerRowIdx = 0;
+            const scanLimit = Math.min(grid.length, 100);
+            let bestHeaderScore = -1;
+            const hintNames = /mobile|phone|contact|cell|msisdn|whatsapp|number|lead|data|name|userid|customer|id/i;
+            for(let r=0;r<scanLimit;r++){
+              const row = grid[r] || [];
+              let filled = 0;
+              let hintScore = 0;
+              for(const h of row){
+                let v = h && h.w !== undefined ? h.w : (h && h.v !== undefined ? h.v : h);
+                v = String(v == null ? '' : v).trim();
+                if(v){ filled++; if(hintNames.test(v)) hintScore += 3; }
+              }
+              const score = hintScore*10+filled;
+              if(score>bestHeaderScore){bestHeaderScore=score;headerRowIdx=r;}
+            }
+            const header = (grid[headerRowIdx] || []).map(function(h){
               if(h && h.w !== undefined) return String(h.w).trim();
               if(h && h.v !== undefined) return String(h.v).trim();
               return String(h == null ? '' : h).trim();
             });
             const label = wb.SheetNames.length > 1 ? (fileName + ' › ' + name) : fileName;
             self.postMessage({type:'sheet', sheetIndex:sheetIndex, label:label, header:header});
-            for(let i=1;i<grid.length;i+=5000){
+            for(let i=headerRowIdx+1;i<grid.length;i+=5000){
               const batch = grid.slice(i,i+5000).map(function(row){
                 return row.map(function(cell){
                   if(cell && cell.w !== undefined) return cell.w;
@@ -597,41 +630,53 @@ function App(){
     let cancelled = false;
 
     async function previewStats(){
-      if(mobileMode !== 'direct' || !mobileColumn || tables.length === 0){
-        if(!cancelled) setUploadStats({totalMobile:0, uniqueCount:0, ready:false});
+      if(mobileMode !== 'direct' || tables.length === 0){
+        if(!cancelled) setUploadStats({totalMobile:0, uniqueCount:0, ready:true});
         return;
       }
 
+      const candidates = [];
+      tables.forEach(table=>{
+        table.header.forEach((name,idx)=>{
+          const key = String(name||'').trim().toLowerCase();
+          if(key && !candidates.some(c=>c.key===key)) candidates.push({key, name:String(name).trim(), idx});
+        });
+      });
+
+      let bestName = mobileColumn;
+      let bestCount = -1;
       const seen = new Set();
       let totalMobile = 0;
-      const BATCH = 3000;
 
-      for(const table of tables){
-        if(cancelled) return;
-        const mobileIdx = table.header.indexOf(mobileColumn);
-        if(mobileIdx < 0) continue;
-        const rows = rowsRef.current.get(table.id) || [];
+      for(const candidate of candidates){
+        let candidateCount = 0;
+        for(const table of tables){
+          const idx = table.header.findIndex(h=>String(h||'').trim().toLowerCase()===candidate.key);
+          if(idx < 0) continue;
+          const rows = rowsRef.current.get(table.id)||[];
+          for(const row of rows){ if(U.normalizeMobile(row[idx])) candidateCount++; }
+        }
+        if(candidateCount>bestCount){bestCount=candidateCount;bestName=candidate.name;}
+      }
 
-        for(let i=0;i<rows.length;i+=BATCH){
-          if(cancelled) return;
-          const slice = rows.slice(i, i+BATCH);
-          for(const row of slice){
-            const clean = U.normalizeMobile(row[mobileIdx]);
-            if(clean){
-              totalMobile++;
-              seen.add(clean);
-            }
-          }
-          await new Promise(resolve=>setTimeout(resolve,0));
+      if(bestCount>0){
+        for(const table of tables){
+          const idx = table.header.findIndex(h=>String(h||'').trim().toLowerCase()===String(bestName||'').trim().toLowerCase());
+          if(idx < 0) continue;
+          const rows = rowsRef.current.get(table.id)||[];
+          for(const row of rows){const clean=U.normalizeMobile(row[idx]);if(clean){totalMobile++;seen.add(clean);}}
         }
       }
 
-      if(!cancelled) setUploadStats({totalMobile, uniqueCount:seen.size, ready:true});
+      if(!cancelled){
+        if(bestCount>0){mobileColumnRef.current=bestName;setMobileColumn(bestName);}
+        setUploadStats({totalMobile,uniqueCount:seen.size,ready:true});
+      }
     }
 
     previewStats();
     return ()=>{cancelled=true;};
-  }, [tables, mobileMode, mobileColumn]);
+  }, [tables, unionColumns, mobileMode, mobileColumn]);
 
   useEffect(()=>{
     if(selectedColumns.length === 0 && unionColumns.length){

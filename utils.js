@@ -108,8 +108,31 @@
     }
     if (field.length || row.length) { row.push(field); rows.push(row); }
     while (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
-    var header = (rows[0] || []).map(function (h) { return String(h).trim(); });
-    return { header: header, rows: rows.slice(1) };
+
+    var headerRowIdx = 0;
+    var bestHeaderScore = -1;
+    var hintPattern = /mobile|phone|contact|cell|msisdn|whatsapp|number|lead|name|userid|user_id|customer|id/i;
+    var scanLimit = Math.min(rows.length, 100);
+    for (var r = 0; r < scanLimit; r++) {
+      var scanRow = rows[r] || [];
+      var filled = 0;
+      var hintScore = 0;
+      scanRow.forEach(function (value) {
+        var text = String(value == null ? '' : value).trim();
+        if (text) {
+          filled++;
+          if (hintPattern.test(text)) hintScore += 3;
+        }
+      });
+      var score = hintScore * 10 + filled;
+      if (score > bestHeaderScore) {
+        bestHeaderScore = score;
+        headerRowIdx = r;
+      }
+    }
+
+    var header = (rows[headerRowIdx] || []).map(function (h) { return String(h).trim(); });
+    return { header: header, rows: rows.slice(headerRowIdx + 1) };
   }
 
   function columnUnion(tables) {
