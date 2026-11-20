@@ -510,6 +510,35 @@ function App(){
     setLog(l => [...l.slice(-60), {text:line, kind}]);
   }
 
+  function rescanMobileCounts(){
+    if(mobileMode !== 'direct' || liveSheetHeadersRef.current.size === 0){ return; }
+    let bestName = '';
+    let bestCount = -1;
+    let bestSeen = new Set();
+
+    liveSheetHeadersRef.current.forEach((header,tableId)=>{
+      header.forEach((name,idx)=>{
+        const seen = new Set();
+        let count = 0;
+        const rows = rowsRef.current.get(tableId)||[];
+        for(const row of rows){
+          const clean = U.normalizeMobile(row[idx]);
+          if(clean){ count++; seen.add(clean); }
+        }
+        if(count > bestCount){ bestCount=count; bestName=String(name||'').trim(); bestSeen=seen; }
+      });
+    });
+
+    if(bestCount > 0){
+      mobileColumnRef.current = bestName;
+      setMobileColumn(bestName);
+      setUploadStats({totalMobile:bestCount,uniqueCount:bestSeen.size,ready:true});
+    }else{
+      setUploadStats({totalMobile:0,uniqueCount:0,ready:true});
+    }
+  }
+
+
   const addFiles = useCallback(async (list)=>{
     const accepted = list.filter(f => /\.(csv|txt|xlsx|xls)$/i.test(f.name));
     if(!accepted.length) return;
@@ -561,6 +590,8 @@ function App(){
           }
         });
         pushLog('Parsed ' + accepted[i].name, 'ok');
+        rescanMobileCounts();
+        rescanMobileCounts();
       }
     }catch(err){
       setParseError('Could not read that file — ' + (err.message || err));
@@ -818,6 +849,16 @@ function App(){
     }
 
     let resolvedMobileColumn = mobileColumn;
+    if(mobileMode === 'direct' && resolvedMobileColumn){
+      let selectedCount = 0;
+      for(const table of includedTables){
+        const idx = table.header.indexOf(resolvedMobileColumn);
+        if(idx < 0) continue;
+        const rows = rowsRef.current.get(table.id)||[];
+        for(const row of rows){ if(U.normalizeMobile(row[idx])) selectedCount++; }
+      }
+      if(selectedCount === 0) resolvedMobileColumn = '';
+    }
     if(mobileMode === 'direct' && !resolvedMobileColumn){
       let bestName = '';
       let bestCount = -1;

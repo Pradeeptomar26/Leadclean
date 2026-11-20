@@ -16,6 +16,9 @@
     var s = String(raw).trim();
     if (s === '') return null;
     s = s.replace(/\.0+$/, '');
+    if(/^\d+(\.\d+)?e[+-]?\d+$/i.test(s)){
+      try{ s = String(Math.round(Number(s))); }catch(e){}
+    }
     s = s.replace(/[\s\-().]/g, '');
     if (s.charAt(0) === '+') s = s.slice(1);
     if (s.length === 12 && s.slice(0, 2) === '91') s = s.slice(2);
