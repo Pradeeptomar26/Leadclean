@@ -310,13 +310,24 @@ async function parseFile(file, onProgress, onBatch){
           wb.SheetNames.forEach(function(name, sheetIndex){
             self.postMessage({ok:false, progress:true, fileName:fileName, phase:'Analyzing sheet', percent:95 + Math.round(((sheetIndex+1)/wb.SheetNames.length)*4)});
             const ws = wb.Sheets[name];
+            const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+            const maxRows = range.e.r - range.s.r + 1;
+            const maxCols = range.e.c - range.s.c + 1;
             let grid;
             if(ws['!data']){
               grid = ws['!data'];
+            }else if(Array.isArray(ws[range.s.r])){
+              // With dense:true, this SheetJS build stores each row as a
+              // numeric-indexed array property directly on the worksheet
+              // object (ws[0], ws[1], ...) rather than under ws['!data'].
+              // Read that format directly instead of falling through to
+              // sparse cell addressing, which returns undefined here and
+              // was silently producing an all-blank grid.
+              grid = new Array(maxRows);
+              for(let r=0;r<maxRows;r++){
+                grid[r] = ws[r+range.s.r] || [];
+              }
             }else{
-              const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-              const maxRows = range.e.r - range.s.r + 1;
-              const maxCols = range.e.c - range.s.c + 1;
               grid = new Array(maxRows);
               for(let r=0;r<maxRows;r++){
                 const outRow = new Array(maxCols);
