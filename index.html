@@ -221,6 +221,51 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
   .col-side{position:static}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+/* ---- Pull-cord lamp login ---- */
+.login-page.lamp-mode{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6vw;background:#0c0e14;position:relative;overflow:hidden}
+.login-page.lamp-mode .lamp-ambient{position:absolute;inset:0;background:radial-gradient(circle at 32% 55%,rgba(53,208,127,0) 0%,rgba(53,208,127,0) 60%,transparent 70%);transition:background .6s ease;pointer-events:none}
+.login-page.lamp-mode.lamp-on .lamp-ambient{background:radial-gradient(circle at 32% 58%,rgba(53,208,127,.16) 0%,rgba(53,208,127,.06) 35%,transparent 70%)}
+.lamp-wrap{position:relative;width:min(28vw,280px);display:flex;flex-direction:column;align-items:center;user-select:none;flex-shrink:0}
+.lamp-light-cone{position:absolute;top:100px;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(53,208,127,.55) 0%,rgba(53,208,127,.18) 40%,transparent 70%);opacity:0;transform:scale(.6);transition:opacity .5s ease,transform .6s ease;filter:blur(2px);pointer-events:none}
+.lamp-mode.lamp-on .lamp-light-cone{opacity:1;transform:scale(1)}
+.lamp-shade{position:relative;width:160px;height:106px;clip-path:polygon(30% 0%,70% 0%,100% 100%,0% 100%);background:linear-gradient(180deg,#3b3d46,#2a2c33);transition:background .5s ease;z-index:2}
+.lamp-mode.lamp-on .lamp-shade{background:linear-gradient(180deg,#3f8f66,#276b49)}
+.lamp-shade-top{position:absolute;top:-7px;left:50%;transform:translateX(-50%);width:54%;height:14px;border-radius:6px 6px 0 0;background:#2a2c33;transition:background .5s ease;z-index:3}
+.lamp-mode.lamp-on .lamp-shade-top{background:#1f5c3e}
+.lamp-face{position:absolute;top:50px;left:50%;transform:translateX(-50%);width:100px;height:46px;display:flex;flex-direction:column;align-items:center;z-index:4}
+.lamp-eyes{display:flex;gap:24px}
+.lamp-eye{width:13px;height:13px;position:relative}
+.lamp-eye::before{content:"";position:absolute;inset:0;border-radius:50%;background:#1c1d22;transform:scaleY(.15);transition:transform .35s ease}
+.lamp-mode.lamp-on .lamp-eye::before{transform:scaleY(1)}
+.lamp-mouth{margin-top:7px;width:14px;height:7px;border-radius:0 0 14px 14px;border:3px solid #1c1d22;border-top:none;opacity:.85;transition:all .35s ease}
+.lamp-mode.lamp-on .lamp-mouth{width:18px;height:11px;border-radius:0 0 18px 18px}
+.lamp-tongue{width:7px;height:6px;background:#e05c6e;border-radius:0 0 7px 7px;margin-top:-3px;opacity:0;transform:translateY(-4px);transition:opacity .3s ease .1s,transform .3s ease .1s}
+.lamp-mode.lamp-on .lamp-tongue{opacity:1;transform:translateY(0)}
+.lamp-pole{width:9px;height:130px;background:linear-gradient(90deg,#c9ccd3,#8d919c,#c9ccd3);z-index:1}
+.lamp-base{width:80px;height:14px;border-radius:50%;background:linear-gradient(180deg,#d7dae0,#9fa3ac);box-shadow:0 10px 24px rgba(0,0,0,.45);z-index:1}
+.lamp-cord{position:absolute;top:140px;left:50%;transform-origin:top center;width:2px;height:60px;background:linear-gradient(180deg,#9aa0ab,#5b5f68);cursor:pointer;animation:lamp-idle-sway 3.4s ease-in-out infinite;z-index:5;border:none;padding:0;appearance:none}
+.lamp-cord.lamp-pulled{animation:lamp-pull-tug .45s ease}
+.lamp-cord-bead{position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:13px;height:13px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e7e9ee,#9397a1);box-shadow:0 2px 6px rgba(0,0,0,.4);display:block}
+.lamp-cord::after{content:"";position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:1px;height:12px;background:#5b5f68}
+@keyframes lamp-idle-sway{0%,100%{transform:rotate(-1.2deg)}50%{transform:rotate(1.2deg)}}
+@keyframes lamp-pull-tug{0%{transform:translateY(0) scaleY(1)}35%{transform:translateY(12px) scaleY(1.12)}65%{transform:translateY(-4px) scaleY(.97)}100%{transform:translateY(0) scaleY(1)}}
+.lamp-hint{margin-top:24px;color:#6b7078;font-size:13px;letter-spacing:.02em;text-align:center;transition:color .4s ease}
+.lamp-mode.lamp-on .lamp-hint{color:#4fae80}
+.login-card.lamp-mode{background:#11141c;border:1px solid rgba(53,208,127,.35);box-shadow:0 0 0 1px rgba(53,208,127,.08),0 0 40px rgba(53,208,127,.18),0 20px 60px rgba(0,0,0,.5);opacity:0;transform:translateX(24px) scale(.97);pointer-events:none;transition:opacity .45s ease,transform .45s ease}
+.login-card.lamp-mode.is-on{opacity:1;transform:translateX(0) scale(1);pointer-events:auto}
+.login-card.lamp-mode .welcome-eyebrow{color:#7fdcab}
+.login-card.lamp-mode h1{color:#f2f5f3}
+.login-card.lamp-mode>p{color:#8a9089}
+.login-card.lamp-mode .brand-name{color:#f2f5f3}
+.login-card.lamp-mode .text-input{background:#161a15;border:1px solid #262b28;color:#eef1ee}
+.login-card.lamp-mode .text-input::placeholder{color:#565c57}
+.login-card.lamp-mode .text-input:focus{border-color:#35d07f;box-shadow:0 0 0 3px rgba(53,208,127,.18)}
+.login-card.lamp-mode .remember-option{color:#c6cbc6}
+.login-card.lamp-mode .forgot-link{color:#7fdcab}
+.login-card.lamp-mode .cta-btn{background:linear-gradient(180deg,#6fe3a8,#35d07f);color:#0b150f;box-shadow:0 8px 20px rgba(53,208,127,.35)}
+.login-card.lamp-mode .login-privacy{color:#5c6058}
+@media (max-width:760px){.login-page.lamp-mode{flex-direction:column;gap:12px;padding:32px 16px}.lamp-wrap{width:220px}}
 </style>
 </head>
 <body>
@@ -495,6 +540,13 @@ function App(){
   const [failedAttempts, setFailedAttempts] = useState(()=>Number(sessionStorage.getItem('leadclean_failed_attempts') || 0));
   const [lockUntil, setLockUntil] = useState(()=>Number(sessionStorage.getItem('leadclean_lock_until') || 0));
   const [lockSeconds, setLockSeconds] = useState(()=>Math.max(0, Math.ceil((Number(sessionStorage.getItem('leadclean_lock_until') || 0)-Date.now())/1000)));
+  const [lampOn, setLampOn] = useState(false);
+  const [cordPulsing, setCordPulsing] = useState(false);
+  function pullCord(){
+    setCordPulsing(true);
+    setLampOn(v=>!v);
+    setTimeout(()=>setCordPulsing(false), 450);
+  }
 
   // Two separate hosts run this same file: the Claude-hosted preview (where
   // window.claude exists and downloads must go through its "downloads"
@@ -644,6 +696,25 @@ function App(){
   const unionColumns = useMemo(()=> U.columnUnion(tables), [tables]);
   const lookupUnion = useMemo(()=> U.columnUnion(lookupTables), [lookupTables]);
   const totalRowsParsed = useMemo(()=> tables.reduce((a,t)=>a+t.rowCount,0), [tables]);
+
+  // How many valid phone numbers each currently-selected "mobile number
+  // column" actually contains — lets the UI flag a column picked there by
+  // mistake (e.g. PAN) instead of it silently contributing nothing.
+  const mobileColumnValidCount = useMemo(()=>{
+    if(mobileMode !== 'direct' || !mobileColumns.length || !tables.length) return {};
+    const counts = {};
+    mobileColumns.forEach(name=>{
+      let count = 0;
+      for(const table of tables){
+        const idx = table.header.indexOf(name);
+        if(idx < 0) continue;
+        const rows = rowsRef.current.get(table.id)||[];
+        for(const row of rows){ if(U.normalizeMobile(row[idx])) count++; }
+      }
+      counts[name] = count;
+    });
+    return counts;
+  }, [tables, mobileColumns, mobileMode]);
 
   const includedTables = useMemo(()=>{
     return tables.filter(t=>{
@@ -1207,8 +1278,36 @@ function App(){
 
   if(!authenticated){
     return (
-      <main className="login-page">
-        <div className="login-card">
+      <main className={'login-page lamp-mode' + (lampOn ? ' lamp-on' : '')}>
+        <div className="lamp-ambient"></div>
+        <div className="lamp-wrap">
+          <div className="lamp-light-cone"></div>
+          <div className="lamp-shade">
+            <div className="lamp-shade-top"></div>
+            <div className="lamp-face">
+              <div className="lamp-eyes">
+                <div className="lamp-eye"></div>
+                <div className="lamp-eye"></div>
+              </div>
+              <div className="lamp-mouth"></div>
+              <div className="lamp-tongue"></div>
+            </div>
+          </div>
+          <div className="lamp-pole"></div>
+          <div className="lamp-base"></div>
+          <button
+            type="button"
+            className={'lamp-cord' + (cordPulsing ? ' lamp-pulled' : '')}
+            onClick={pullCord}
+            aria-label="Pull the cord to show or hide sign-in"
+            title="Pull me"
+          >
+            <span className="lamp-cord-bead"></span>
+          </button>
+          <div className="lamp-hint">{lampOn ? 'pull again to turn off' : 'pull the cord to sign in'}</div>
+        </div>
+
+        <div className={'login-card lamp-mode' + (lampOn ? ' is-on' : '')}>
           <Brand wordmark={true} login={true} />
           <div className="welcome-eyebrow">Welcome back</div>
           <h1>Sign in</h1>
@@ -1372,7 +1471,13 @@ function App(){
 
               {mobileMode === 'direct' && (
                 <div className="field">
-                  <label>Mobile number column(s)</label>
+                  <label>Mobile number column(s) — phone numbers only</label>
+                  <p className="panel-sub">
+                    Tick a column here ONLY if it actually holds phone numbers (useful when different files
+                    call it "Mobile", "Contact No.", etc. — tick all of them and they'll be combined). For any
+                    other field you want to keep in the export, like PAN, use "Also keep unique" below instead
+                    — not this box.
+                  </p>
                   <p className="panel-sub">
                     {mobileColumns.length
                       ? ('Using: ' + mobileColumns.join(', ') + ' — numbers from every selected column are combined.')
@@ -1385,6 +1490,7 @@ function App(){
                   <div className="col-picker">
                     {unionColumns.map(c=>{
                       const checked = mobileColumns.includes(c.name);
+                      const zeroValid = checked && mobileColumnValidCount[c.name] === 0;
                       return (
                         <div className="col-item" key={c.name}>
                           <input
@@ -1393,6 +1499,11 @@ function App(){
                             onChange={()=>setMobileColumns(cols => cols.includes(c.name) ? cols.filter(n=>n!==c.name) : [...cols, c.name])}
                           />
                           <span className="cname">{c.name}</span>
+                          {zeroValid && (
+                            <span style={{color:'var(--bad)', marginLeft:8, fontSize:'0.85em'}}>
+                              — 0 valid phone numbers found here; did you mean to put this in "Also keep unique" below instead?
+                            </span>
+                          )}
                         </div>
                       );
                     })}
@@ -1402,11 +1513,11 @@ function App(){
 
               {mode === 'unique' && unionColumns.length>0 && (
                 <div className="field">
-                  <label>Also keep unique (optional)</label>
+                  <label>Also keep unique (optional) — for everything that isn't a phone number</label>
                   <p className="panel-sub">
                     {extraUniqueColumns.length
                       ? ('Output will be: Mobile, ' + extraUniqueColumns.join(', ') + ' — a row is kept only if every one of these is new.')
-                      : 'Pick extra columns (like PAN) to attach to each unique mobile number — each one deduped on its own.'}
+                      : 'Pick extra columns (like PAN) to attach to each unique mobile number — tick them here, not in the box above. Each one gets deduped on its own.'}
                   </p>
                   <div className="picker-tools">
                     <button type="button" onClick={()=>setExtraUniqueColumns(unionColumns.map(c=>c.name).filter(n=>!mobileColumns.includes(n)))}>Select all</button>
