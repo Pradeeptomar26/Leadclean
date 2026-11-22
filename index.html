@@ -458,14 +458,14 @@ function App(){
   const [fileReadProgress, setFileReadProgress] = useState({});
   const [fileReadRows, setFileReadRows] = useState({});
   const rowsRef = useRef(new Map());
-  const mobileColumnRef = useRef('');
+  const mobileColumnsRef = useRef([]);
   const liveSheetHeadersRef = useRef(new Map());
   const liveMobileSeenRef = useRef(new Set());
   const liveMobileTotalRef = useRef(0);
 
   const [mode, setMode] = useState('unique');
   const [mobileMode, setMobileMode] = useState('direct');
-  const [mobileColumn, setMobileColumn] = useState('');
+  const [mobileColumns, setMobileColumns] = useState([]);
   const [skippedShapes, setSkippedShapes] = useState({});
 
   const [lookupFiles, setLookupFiles] = useState([]);
@@ -476,6 +476,7 @@ function App(){
   const [lookupValue, setLookupValue] = useState('');
 
   const [selectedColumns, setSelectedColumns] = useState([]);
+  const [extraUniqueColumns, setExtraUniqueColumns] = useState([]);
   const [splitMode, setSplitMode] = useState('none');
   const [splitValue, setSplitValue] = useState('');
   const [outputNames, setOutputNames] = useState([]);
@@ -520,30 +521,23 @@ function App(){
 
   function rescanMobileCounts(){
     if(mobileMode !== 'direct' || tables.length === 0){ return; }
-    let bestName = '';
-    let bestCount = -1;
-    let bestSeen = new Set();
+    const cols = mobileColumnsRef.current;
+    if(!cols.length){ setUploadStats({totalMobile:0,uniqueCount:0,ready:true}); return; }
 
+    let total = 0;
+    const seen = new Set();
     liveSheetHeadersRef.current.forEach((header,tableId)=>{
-      header.forEach((name,idx)=>{
-        const seen = new Set();
-        let count = 0;
-        const rows = rowsRef.current.get(tableId)||[];
-        for(const row of rows){
+      const idxs = cols.map(name=>header.indexOf(name)).filter(i=>i>=0);
+      if(!idxs.length) return;
+      const rows = rowsRef.current.get(tableId)||[];
+      for(const row of rows){
+        for(const idx of idxs){
           const clean = U.normalizeMobile(row[idx]);
-          if(clean){ count++; seen.add(clean); }
+          if(clean){ total++; seen.add(clean); }
         }
-        if(count > bestCount){ bestCount=count; bestName=String(name||'').trim(); bestSeen=seen; }
-      });
+      }
     });
-
-    if(bestCount > 0){
-      mobileColumnRef.current = bestName;
-      setMobileColumn(bestName);
-      setUploadStats({totalMobile:bestCount,uniqueCount:bestSeen.size,ready:true});
-    }else{
-      setUploadStats({totalMobile:0,uniqueCount:0,ready:true});
-    }
+    setUploadStats({totalMobile:total, uniqueCount:seen.size, ready:true});
   }
 
   const addFiles = useCallback(async (list)=>{
@@ -564,9 +558,9 @@ function App(){
           if(batch.type === 'sheet'){
             const id = fileId+'__'+batch.sheetIndex;
             liveSheetHeadersRef.current.set(id, batch.header);
-            if(!mobileColumnRef.current){
+            if(!mobileColumnsRef.current.length){
               const guessed = guessColumn(batch.header, MOBILE_HINTS);
-              if(guessed){ mobileColumnRef.current = guessed; setMobileColumn(guessed); }
+              if(guessed){ mobileColumnsRef.current = [guessed]; setMobileColumns([guessed]); }
             }
             rowsRef.current.set(id, []);
             setTables(ts=>[...ts, {id, fileId, label:batch.label, header:batch.header, rowCount:0}]);
@@ -575,13 +569,15 @@ function App(){
             parsedRowCount += batch.rows.length;
             if(mobileMode === 'direct'){
               const header = liveSheetHeadersRef.current.get(id) || [];
-              const mobileIdx = header.indexOf(mobileColumnRef.current);
-              if(mobileIdx >= 0){
+              const mobileIdxs = mobileColumnsRef.current.map(name=>header.indexOf(name)).filter(i=>i>=0);
+              if(mobileIdxs.length){
                 batch.rows.forEach(row=>{
-                  const clean = U.normalizeMobile(row[mobileIdx]);
-                  if(clean){
-                    liveMobileTotalRef.current++;
-                    liveMobileSeenRef.current.add(clean);
+                  for(const mobileIdx of mobileIdxs){
+                    const clean = U.normalizeMobile(row[mobileIdx]);
+                    if(clean){
+                      liveMobileTotalRef.current++;
+                      liveMobileSeenRef.current.add(clean);
+                    }
                   }
                 });
                 setUploadStats({
@@ -657,66 +653,53 @@ function App(){
     });
   }, [tables, dominant, skippedShapes]);
 
-  useEffect(()=>{mobileColumnRef.current = mobileColumn;}, [mobileColumn]);
+  useEffect(()=>{mobileColumnsRef.current = mobileColumns;}, [mobileColumns]);
 
   useEffect(()=>{
-    if(!mobileColumn && unionColumns.length){
-      const guess = guessColumn(unionColumns.map(c=>c.name), MOBILE_HINTS);
-      if(guess) setMobileColumn(guess);
+    if(unionColumns.length){
+      setMobileColumns(cols=>{
+        if(cols.length) return cols;
+        const guess = guessColumn(unionColumns.map(c=>c.name), MOBILE_HINTS);
+        return guess ? [guess] : cols;
+      });
     }
-  }, [unionColumns, mobileColumn]);
+  }, [unionColumns]);
 
   useEffect(()=>{
     let cancelled = false;
 
+    // Recomputes stats from whichever column(s) are currently selected in
+    // "Check the columns" — it never picks a different column on its own.
+    // The old version re-scored every column on each run and silently
+    // overwrote the user's choice with whatever looked most mobile-like,
+    // which is why selecting anything other than "Mobile" snapped straight
+    // back to it.
     async function previewStats(){
-      if(mobileMode !== 'direct' || tables.length === 0){
+      if(mobileMode !== 'direct' || tables.length === 0 || mobileColumns.length === 0){
         if(!cancelled) setUploadStats({totalMobile:0, uniqueCount:0, ready:true});
         return;
       }
 
-      const candidates = [];
-      tables.forEach(table=>{
-        table.header.forEach((name,idx)=>{
-          const key = String(name||'').trim().toLowerCase();
-          if(key && !candidates.some(c=>c.key===key)) candidates.push({key, name:String(name).trim(), idx});
-        });
-      });
-
-      let bestName = mobileColumn;
-      let bestCount = -1;
-      const seen = new Set();
       let totalMobile = 0;
-
-      for(const candidate of candidates){
-        let candidateCount = 0;
-        for(const table of tables){
-          const idx = table.header.findIndex(h=>String(h||'').trim().toLowerCase()===candidate.key);
-          if(idx < 0) continue;
-          const rows = rowsRef.current.get(table.id)||[];
-          for(const row of rows){ if(U.normalizeMobile(row[idx])) candidateCount++; }
-        }
-        if(candidateCount>bestCount){bestCount=candidateCount;bestName=candidate.name;}
-      }
-
-      if(bestCount>0){
-        for(const table of tables){
-          const idx = table.header.findIndex(h=>String(h||'').trim().toLowerCase()===String(bestName||'').trim().toLowerCase());
-          if(idx < 0) continue;
-          const rows = rowsRef.current.get(table.id)||[];
-          for(const row of rows){const clean=U.normalizeMobile(row[idx]);if(clean){totalMobile++;seen.add(clean);}}
+      const seen = new Set();
+      for(const table of tables){
+        const idxs = mobileColumns.map(name=>table.header.indexOf(name)).filter(i=>i>=0);
+        if(!idxs.length) continue;
+        const rows = rowsRef.current.get(table.id)||[];
+        for(const row of rows){
+          for(const idx of idxs){
+            const clean = U.normalizeMobile(row[idx]);
+            if(clean){ totalMobile++; seen.add(clean); }
+          }
         }
       }
 
-      if(!cancelled){
-        if(bestCount>0){mobileColumnRef.current=bestName;setMobileColumn(bestName);}
-        setUploadStats({totalMobile,uniqueCount:seen.size,ready:true});
-      }
+      if(!cancelled) setUploadStats({totalMobile, uniqueCount:seen.size, ready:true});
     }
 
     previewStats();
     return ()=>{cancelled=true;};
-  }, [tables, unionColumns, mobileMode, mobileColumn]);
+  }, [tables, mobileMode, mobileColumns]);
 
   useEffect(()=>{
     if(selectedColumns.length === 0 && unionColumns.length){
@@ -735,7 +718,7 @@ function App(){
   }, [lookupUnion, unionColumns]);
 
   const readyToProcess = includedTables.length > 0 &&
-    (mobileMode === 'direct' ? (unionColumns.length>0 || !!mobileColumn) : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
+    (mobileMode === 'direct' ? mobileColumns.length>0 : (lookupMainKey && lookupKey && lookupValue && lookupTables.length>0)) &&
     !proc.running;
 
   const splitPartCount = splitMode === 'none'
@@ -848,18 +831,18 @@ function App(){
       pushLog('Lookup map built: ' + fmtNum(lookupMap.size) + ' keys', 'ok');
     }
 
-    let resolvedMobileColumn = mobileColumn;
-    if(mobileMode === 'direct' && resolvedMobileColumn){
+    let resolvedMobileColumns = mobileColumns.filter(name => includedTables.some(t => t.header.indexOf(name) >= 0));
+    if(mobileMode === 'direct' && resolvedMobileColumns.length){
       let selectedCount = 0;
       for(const table of includedTables){
-        const idx = table.header.indexOf(resolvedMobileColumn);
-        if(idx < 0) continue;
+        const idxs = resolvedMobileColumns.map(name=>table.header.indexOf(name)).filter(i=>i>=0);
+        if(!idxs.length) continue;
         const rows = rowsRef.current.get(table.id)||[];
-        for(const row of rows){ if(U.normalizeMobile(row[idx])) selectedCount++; }
+        for(const row of rows){ for(const idx of idxs){ if(U.normalizeMobile(row[idx])) selectedCount++; } }
       }
-      if(selectedCount === 0) resolvedMobileColumn = '';
+      if(selectedCount === 0) resolvedMobileColumns = [];
     }
-    if(mobileMode === 'direct' && !resolvedMobileColumn){
+    if(mobileMode === 'direct' && !resolvedMobileColumns.length){
       let bestName = '';
       let bestCount = -1;
       for(const table of includedTables){
@@ -870,9 +853,15 @@ function App(){
           if(count>bestCount){bestCount=count;bestName=name;}
         });
       }
-      resolvedMobileColumn = bestName;
-      if(resolvedMobileColumn){setMobileColumn(resolvedMobileColumn);}
+      if(bestName){ resolvedMobileColumns = [bestName]; setMobileColumns([bestName]); }
     }
+
+    // Extra columns the user wants kept alongside Mobile in "Unique numbers
+    // only" mode (e.g. PAN), each deduped on its own — a row is kept only
+    // if its Mobile number AND every one of these extra values are each
+    // new (not seen in any row kept so far for that same column).
+    const extraCols = mode === 'unique' ? extraUniqueColumns.filter(name => !resolvedMobileColumns.includes(name)) : [];
+    const extraColSeen = extraCols.map(()=> new Set());
 
     const uniqueOrder = []; const uniqueSeen = new Set();
     let scanned = 0, totalMobile = 0, unmatchedLookup = 0, invalidMobile = 0;
@@ -905,28 +894,61 @@ function App(){
 
     for(const t of includedTables){
       const rows = rowsRef.current.get(t.id) || [];
-      const mobileIdx = mobileMode === 'direct' ? t.header.indexOf(resolvedMobileColumn) : -1;
+      const mobileIdxs = mobileMode === 'direct' ? resolvedMobileColumns.map(name=>t.header.indexOf(name)).filter(i=>i>=0) : [];
       const mainKeyIdx = mobileMode === 'lookup' ? t.header.indexOf(lookupMainKey) : -1;
       const colIdx = mode === 'merge' ? selectedColumns.map(c => t.header.indexOf(c)) : null;
+      const extraColIdx = extraCols.map(name => t.header.indexOf(name));
 
       for(let i=0;i<rows.length;i+=BATCH){
         const slice = rows.slice(i, i+BATCH);
         for(const r of slice){
-          let mobileRaw = null;
+          // In "direct" mode a row can have more than one selected mobile
+          // column (e.g. "Mobile" and "Alternate Mobile"); every valid
+          // number found across all of them counts and is deduped together.
+          let mobileRaws;
           if(mobileMode === 'direct'){
-            mobileRaw = mobileIdx>=0 ? r[mobileIdx] : null;
+            mobileRaws = mobileIdxs.map(ix => r[ix]);
           } else {
             const k = mainKeyIdx>=0 ? U.keyText(r[mainKeyIdx]) : '';
-            mobileRaw = (k && lookupMap.has(k)) ? lookupMap.get(k) : null;
-            if(!mobileRaw) unmatchedLookup++;
+            const raw = (k && lookupMap.has(k)) ? lookupMap.get(k) : null;
+            if(!raw) unmatchedLookup++;
+            mobileRaws = [raw];
           }
-          const clean = U.normalizeMobile(mobileRaw);
-          if(clean) totalMobile++;
-          if(!clean && mobileRaw!==null) invalidMobile++;
+
+          for(const mobileRaw of mobileRaws){
+            const clean = U.normalizeMobile(mobileRaw);
+            if(clean) totalMobile++;
+            if(!clean && mobileRaw!==null && mobileRaw!==undefined) invalidMobile++;
+          }
 
           if(mode === 'unique'){
-            if(clean && !uniqueSeen.has(clean)){ uniqueSeen.add(clean); uniqueOrder.push(clean); }
-          } else {
+            if(extraColIdx.length === 0){
+              // No extra columns selected — unchanged behavior: pool every
+              // valid hit from every selected mobile-ish column.
+              for(const mobileRaw of mobileRaws){
+                const clean = U.normalizeMobile(mobileRaw);
+                if(clean && !uniqueSeen.has(clean)){ uniqueSeen.add(clean); uniqueOrder.push(clean); }
+              }
+            } else {
+              // Extra columns selected (e.g. PAN alongside Mobile): take the
+              // first valid mobile number in this row, pair it with this
+              // row's extra values, and keep the row only if the mobile AND
+              // every non-blank extra value are each new to their own column.
+              let clean = null;
+              for(const mobileRaw of mobileRaws){ clean = U.normalizeMobile(mobileRaw); if(clean) break; }
+              if(clean && !uniqueSeen.has(clean)){
+                const extraVals = extraColIdx.map(ix => ix>=0 ? String(r[ix]==null?'':r[ix]).trim() : '');
+                const dup = extraVals.some((v,i) => v && extraColSeen[i].has(v.toLowerCase()));
+                if(!dup){
+                  uniqueSeen.add(clean);
+                  extraVals.forEach((v,i)=>{ if(v) extraColSeen[i].add(v.toLowerCase()); });
+                  uniqueOrder.push([clean, ...extraVals]);
+                }
+              }
+            }
+          }
+
+          if(mode === 'merge'){
             const out = colIdx.map(ix => ix>=0 ? r[ix] : '');
             curChunks.push(out.map(csvEscape).join(',') + '\r\n');
             curRowCount++;
@@ -953,7 +975,12 @@ function App(){
         return {...out, name:cleanOutputName(outputNames[0], fallback, idx, mergeOutputs.length > 1)};
       });
     } else {
-      const header = ['mobile'];
+      // With extra columns selected, each row in uniqueOrder is an array
+      // [mobile, ...extraValues] and the header always starts with the
+      // fixed label "Mobile" followed by each extra column's own name, in
+      // the order it was selected. With none selected, this is unchanged:
+      // a single "mobile" column of plain numbers.
+      const header = extraCols.length ? ['Mobile', ...extraCols] : ['mobile'];
       let parts;
       if(splitMode === 'none'){
         parts = [uniqueOrder];
@@ -965,7 +992,7 @@ function App(){
       }
       outputs = parts.map((p, idx) => {
         const chunks = [header.map(csvEscape).join(',') + '\r\n'];
-        p.forEach(n => chunks.push(csvEscape(n) + '\r\n'));
+        p.forEach(n => chunks.push((Array.isArray(n) ? n.map(csvEscape).join(',') : csvEscape(n)) + '\r\n'));
         const blob = new Blob(chunks, {type:'text/csv'});
         const fallback = parts.length>1 ? ('unique_mobiles_part'+(idx+1)+'.csv') : 'unique_mobiles.csv';
         const name = cleanOutputName(outputNames[0], fallback, idx, parts.length > 1);
@@ -1054,13 +1081,24 @@ function App(){
       const wbout = XLSX.write(workbook, {bookType:'xlsx', type:'array'});
       const blob = new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 
+      // Name the downloaded XLSX after the user's own output filename base
+      // (e.g. "Leads_221126"), stripped of any trailing "_1"/"_2" part
+      // number — the sheet inside already lists every part by its own name.
+      let stem = String(outputNames[0] || '').trim();
+      if(!stem) stem = mode==='merge' ? 'merged_leads' : 'unique_mobiles';
+      if(stem.toLowerCase().endsWith('.csv')) stem = stem.slice(0,-4);
+      stem = stem.replace(/[\\/:*?"<>|]/g,'-');
+      const trailingNumber = stem.match(/^(.*?)(?:_|-)(\d+)$/);
+      if(trailingNumber) stem = trailingNumber[1];
+      const xlsxName = stem + '.xlsx';
+
       if(downloadsCap){
-        await downloadsCap.save({filename:'output_file_names.xlsx', data:blob});
+        await downloadsCap.save({filename:xlsxName, data:blob});
       }else if(!inArtifactHost){
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'output_file_names.xlsx';
+        a.download = xlsxName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -1268,12 +1306,19 @@ function App(){
                   <label>{unionColumns.length} column(s) found across {tables.length} sheet(s)</label>
                   <div className="column-check-list">
                     {unionColumns.map(c=>{
-                      const selected = mobileColumn === c.name;
+                      const selected = mobileColumns.includes(c.name);
                       return (
                         <div className="column-check-row" data-selected={selected} key={c.name}>
                           <span className="column-check-name">{c.name}</span>
                           <span className="column-check-count">Present in {c.count}/{tables.length} sheets</span>
-                          <button type="button" className="column-check-select" onClick={()=>{setMobileMode('direct');setMobileColumn(c.name);}}>
+                          <button
+                            type="button"
+                            className="column-check-select"
+                            onClick={()=>{
+                              setMobileMode('direct');
+                              setMobileColumns(cols => cols.includes(c.name) ? cols.filter(n=>n!==c.name) : [...cols, c.name]);
+                            }}
+                          >
                             {selected ? 'Selected' : 'Select'}
                           </button>
                         </div>
@@ -1327,13 +1372,61 @@ function App(){
 
               {mobileMode === 'direct' && (
                 <div className="field">
-                  <label>Mobile number column</label>
-                  <select value={mobileColumn} onChange={e=>setMobileColumn(e.target.value)}>
-                    <option value="">Choose a column…</option>
-                    {unionColumns.map(c=>(
-                      <option key={c.name} value={c.name}>{c.name} — in {c.count} of {tables.length} sheet(s)</option>
-                    ))}
-                  </select>
+                  <label>Mobile number column(s)</label>
+                  <p className="panel-sub">
+                    {mobileColumns.length
+                      ? ('Using: ' + mobileColumns.join(', ') + ' — numbers from every selected column are combined.')
+                      : 'None selected yet.'}
+                  </p>
+                  <div className="picker-tools">
+                    <button type="button" onClick={()=>setMobileColumns(unionColumns.map(c=>c.name))}>Select all</button>
+                    <button type="button" onClick={()=>setMobileColumns([])}>Clear all</button>
+                  </div>
+                  <div className="col-picker">
+                    {unionColumns.map(c=>{
+                      const checked = mobileColumns.includes(c.name);
+                      return (
+                        <div className="col-item" key={c.name}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={()=>setMobileColumns(cols => cols.includes(c.name) ? cols.filter(n=>n!==c.name) : [...cols, c.name])}
+                          />
+                          <span className="cname">{c.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {mode === 'unique' && unionColumns.length>0 && (
+                <div className="field">
+                  <label>Also keep unique (optional)</label>
+                  <p className="panel-sub">
+                    {extraUniqueColumns.length
+                      ? ('Output will be: Mobile, ' + extraUniqueColumns.join(', ') + ' — a row is kept only if every one of these is new.')
+                      : 'Pick extra columns (like PAN) to attach to each unique mobile number — each one deduped on its own.'}
+                  </p>
+                  <div className="picker-tools">
+                    <button type="button" onClick={()=>setExtraUniqueColumns(unionColumns.map(c=>c.name).filter(n=>!mobileColumns.includes(n)))}>Select all</button>
+                    <button type="button" onClick={()=>setExtraUniqueColumns([])}>Clear all</button>
+                  </div>
+                  <div className="col-picker">
+                    {unionColumns.filter(c=>!mobileColumns.includes(c.name)).map(c=>{
+                      const checked = extraUniqueColumns.includes(c.name);
+                      return (
+                        <div className="col-item" key={c.name}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={()=>setExtraUniqueColumns(cols => cols.includes(c.name) ? cols.filter(n=>n!==c.name) : [...cols, c.name])}
+                          />
+                          <span className="cname">{c.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
