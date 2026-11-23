@@ -9,5 +9,11 @@
   "assets": {
     "directory": "public",
     "binding": "ASSETS"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "LEADCLEAN_KV",
+      "id": "9428b1dedafe4614a4a6203f876fa910"
+    }
+  ]
 }
