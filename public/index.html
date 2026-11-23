@@ -117,6 +117,24 @@ h1,h2,h3,p{margin:0}
 .theme-toggle-btn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--accent-soft);font-size:15px;margin-left:2px;transition:background .15s}
 .theme-toggle-btn:hover{background:var(--line)}
 
+/* --- manage team modal --- */
+.team-overlay{position:fixed;inset:0;background:rgba(6,8,12,.5);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+.team-card{position:relative;width:100%;max-width:420px;max-height:80vh;overflow-y:auto;background:var(--panel);border-radius:16px;padding:24px 26px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.team-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.team-card-head h2{font-size:17px;font-weight:700}
+.team-close-btn{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);font-size:13px}
+.team-close-btn:hover{background:var(--line)}
+.team-card-sub{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 0 16px}
+.team-error{background:var(--bad-soft);color:var(--bad);font-size:12.5px;padding:9px 12px;border-radius:9px;margin-bottom:12px}
+.team-add-row{display:flex;flex-direction:column;gap:8px;margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.team-list{display:flex;flex-direction:column;gap:6px}
+.team-list-empty{font-size:12.5px;color:var(--muted);padding:8px 0}
+.team-row{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+.team-row-mobile{font-weight:600;letter-spacing:.2px}
+.team-row-badge{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:4px 9px;border-radius:999px}
+.team-row-remove{font-size:11.5px;font-weight:600;color:var(--bad);background:var(--bad-soft);padding:5px 10px;border-radius:999px}
+.team-row-remove:hover{opacity:.8}
+
 /* --- hero --- */
 .hero{padding:40px 4px 8px;max-width:720px}
 .eyebrow{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
@@ -606,6 +624,86 @@ function App(){
   }, [theme]);
   function toggleTheme(){
     setTheme(t => t === 'dark' ? 'light' : 'dark');
+  }
+  function getAuthToken(){
+    return sessionStorage.getItem('leadclean_token') || localStorage.getItem('leadclean_token') || '';
+  }
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState('');
+  const [teamNewMobile, setTeamNewMobile] = useState('');
+  const [teamNewPassword, setTeamNewPassword] = useState('');
+  const [teamAddBusy, setTeamAddBusy] = useState(false);
+  async function openTeamPanel(){
+    setTeamOpen(true);
+    setTeamError('');
+    setTeamLoading(true);
+    try{
+      const res = await fetch('/api/team/list', {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + getAuthToken()}
+      });
+      const data = await res.json().catch(()=>({}));
+      if(res.ok && data.ok){
+        setTeamUsers(data.users || []);
+      }else{
+        setTeamError((data && data.error) || 'Could not load the team list.');
+      }
+    }catch(e){
+      setTeamError('Could not reach the server. Check your connection and try again.');
+    }
+    setTeamLoading(false);
+  }
+  function closeTeamPanel(){
+    setTeamOpen(false);
+    setTeamError('');
+    setTeamNewMobile('');
+    setTeamNewPassword('');
+  }
+  async function addTeamUser(e){
+    e.preventDefault();
+    setTeamError('');
+    const mobile = teamNewMobile.replace(/\D/g,'');
+    if(mobile.length !== 10){ setTeamError('Enter a valid 10-digit mobile number.'); return; }
+    if(teamNewPassword.length < 8){ setTeamError('Password must be at least 8 characters.'); return; }
+    setTeamAddBusy(true);
+    try{
+      const res = await fetch('/api/team/add', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'Authorization': 'Bearer ' + getAuthToken()},
+        body: JSON.stringify({ mobile, password: teamNewPassword })
+      });
+      const data = await res.json().catch(()=>({}));
+      if(res.ok && data.ok){
+        setTeamNewMobile('');
+        setTeamNewPassword('');
+        await openTeamPanel();
+      }else{
+        setTeamError((data && data.error) || 'Could not add this teammate.');
+      }
+    }catch(e){
+      setTeamError('Could not reach the server. Check your connection and try again.');
+    }
+    setTeamAddBusy(false);
+  }
+  async function removeTeamUser(mobile){
+    setTeamError('');
+    try{
+      const res = await fetch('/api/team/remove', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'Authorization': 'Bearer ' + getAuthToken()},
+        body: JSON.stringify({ mobile })
+      });
+      const data = await res.json().catch(()=>({}));
+      if(res.ok && data.ok){
+        setTeamUsers(prev => prev.filter(u => u.mobile !== mobile));
+      }else{
+        setTeamError((data && data.error) || 'Could not remove this teammate.');
+      }
+    }catch(e){
+      setTeamError('Could not reach the server. Check your connection and try again.');
+    }
   }
   function pullCord(){
     setCordPulsing(true);
@@ -1337,6 +1435,7 @@ function App(){
     }
     setLoginBusy(true);
     let ok = false;
+    let token = '';
     try{
       const res = await fetch('/api/login', {
         method: 'POST',
@@ -1345,6 +1444,7 @@ function App(){
       });
       const data = await res.json().catch(()=>({}));
       ok = res.ok && data && data.ok === true;
+      token = (data && data.token) || '';
     }catch(e){
       setLoginBusy(false);
       setLoginError('Could not reach the server. Check your connection and try again.');
@@ -1353,12 +1453,15 @@ function App(){
     setLoginBusy(false);
     if(ok){
       sessionStorage.setItem('leadclean_authenticated','true');
+      sessionStorage.setItem('leadclean_token', token);
       if(rememberMe){
         localStorage.setItem('leadclean_authenticated','true');
         localStorage.setItem('leadclean_remember_me','true');
+        localStorage.setItem('leadclean_token', token);
       }else{
         localStorage.removeItem('leadclean_authenticated');
         localStorage.removeItem('leadclean_remember_me');
+        localStorage.removeItem('leadclean_token');
       }
       sessionStorage.removeItem('leadclean_failed_attempts');
       sessionStorage.removeItem('leadclean_lock_until');
@@ -1605,11 +1708,65 @@ function App(){
             <button className="theme-toggle-btn" onClick={toggleTheme} title={theme==='dark' ? 'Switch to light mode' : 'Switch to dark mode'} aria-label="Toggle dark mode">
               {theme==='dark' ? '☀️' : '🌙'}
             </button>
+            <button className="nav-cta" onClick={openTeamPanel}>Manage team</button>
             <button className="nav-cta" onClick={()=>window.location.reload()}>Start over</button>
-            <button className="nav-cta" onClick={()=>{sessionStorage.removeItem('leadclean_authenticated'); localStorage.removeItem('leadclean_authenticated'); setAuthenticated(false);}}>Sign out</button>
+            <button className="nav-cta" onClick={()=>{sessionStorage.removeItem('leadclean_authenticated'); sessionStorage.removeItem('leadclean_token'); localStorage.removeItem('leadclean_authenticated'); localStorage.removeItem('leadclean_token'); setAuthenticated(false);}}>Sign out</button>
           </div>
         </nav>
       </div>
+
+      {teamOpen && (
+        <div className="team-overlay" onClick={(e)=>{ if(e.target===e.currentTarget) closeTeamPanel(); }}>
+          <div className="team-card">
+            <div className="team-card-head">
+              <h2>Manage team</h2>
+              <button className="team-close-btn" onClick={closeTeamPanel} aria-label="Close">✕</button>
+            </div>
+            <p className="team-card-sub">Teammates added here can log in with their own mobile number &amp; password, same access as you.</p>
+
+            {teamError && <div className="team-error">{teamError}</div>}
+
+            <form className="team-add-row" onSubmit={addTeamUser}>
+              <input
+                type="text"
+                className="text-input"
+                placeholder="10-digit mobile number"
+                value={teamNewMobile}
+                onChange={e=>setTeamNewMobile(e.target.value)}
+                maxLength={10}
+                inputMode="numeric"
+              />
+              <input
+                type="password"
+                className="text-input"
+                placeholder="Password (min 8 characters)"
+                value={teamNewPassword}
+                onChange={e=>setTeamNewPassword(e.target.value)}
+              />
+              <button className="cta-btn" type="submit" disabled={teamAddBusy}>
+                {teamAddBusy ? 'Adding…' : 'Add teammate'}
+              </button>
+            </form>
+
+            <div className="team-list">
+              {teamLoading ? (
+                <div className="team-list-empty">Loading…</div>
+              ) : teamUsers.length === 0 ? (
+                <div className="team-list-empty">No team members yet.</div>
+              ) : teamUsers.map(u => (
+                <div className="team-row" key={u.mobile}>
+                  <span className="team-row-mobile">{u.mobile}</span>
+                  {u.isAdmin ? (
+                    <span className="team-row-badge">Admin</span>
+                  ) : (
+                    <button className="team-row-remove" onClick={()=>removeTeamUser(u.mobile)}>Remove</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="wrap">
         <div className="hero">
