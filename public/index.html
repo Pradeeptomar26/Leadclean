@@ -266,6 +266,20 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
 .login-card.lamp-mode .cta-btn{background:linear-gradient(180deg,#6fe3a8,#35d07f);color:#0b150f;box-shadow:0 8px 20px rgba(53,208,127,.35)}
 .login-card.lamp-mode .login-privacy{color:#5c6058}
 @media (max-width:760px){.login-page.lamp-mode{flex-direction:column;gap:12px;padding:32px 16px}.lamp-wrap{width:220px}}
+.forgot-overlay{position:fixed;inset:0;background:rgba(6,8,12,.72);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+.forgot-card{position:relative;width:100%;max-width:380px;background:#11141c;border:1px solid rgba(53,208,127,.35);box-shadow:0 0 0 1px rgba(53,208,127,.08),0 0 40px rgba(53,208,127,.18),0 20px 60px rgba(0,0,0,.5);border-radius:16px;padding:28px 26px}
+.forgot-card h2{color:#f2f5f3;margin:0 0 8px}
+.forgot-card p{color:#8a9089;font-size:13px;line-height:1.5;margin:0 0 18px}
+.forgot-card .field{margin-bottom:14px}
+.forgot-card .field label{color:#c6cbc6}
+.forgot-card .text-input{background:#161a15;border:1px solid #262b28;color:#eef1ee}
+.forgot-card .text-input::placeholder{color:#565c57}
+.forgot-card .text-input:focus{border-color:#35d07f;box-shadow:0 0 0 3px rgba(53,208,127,.18)}
+.forgot-card .cta-btn{background:linear-gradient(180deg,#6fe3a8,#35d07f);color:#0b150f;box-shadow:0 8px 20px rgba(53,208,127,.35);width:100%;margin-top:4px}
+.forgot-card .forgot-link{display:block;margin-top:12px;color:#7fdcab;text-align:center;width:100%}
+.forgot-card .login-error{color:#ff8a8a}
+.forgot-close{position:absolute;top:10px;right:14px;background:none;border:none;color:#8a9089;font-size:22px;line-height:1;cursor:pointer;padding:4px}
+.forgot-close:hover{color:#eef1ee}
 </style>
 </head>
 <body>
@@ -542,6 +556,16 @@ function App(){
   const [lockSeconds, setLockSeconds] = useState(()=>Math.max(0, Math.ceil((Number(sessionStorage.getItem('leadclean_lock_until') || 0)-Date.now())/1000)));
   const [lampOn, setLampOn] = useState(false);
   const [cordPulsing, setCordPulsing] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotStep, setForgotStep] = useState('email'); // 'email' | 'otp' | 'reset' | 'done'
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [resetToken, setResetToken] = useState('');
   function pullCord(){
     setCordPulsing(true);
     setLampOn(v=>!v);
@@ -1241,13 +1265,29 @@ function App(){
     return ()=>clearInterval(timer);
   }, [lockUntil, lockSeconds]);
 
-  function handleLogin(e){
+  async function handleLogin(e){
     e.preventDefault();
     if(Date.now() < lockUntil){
       setLoginError('Try again ' + Math.ceil((lockUntil-Date.now())/1000) + ' seconds later.');
       return;
     }
-    if(loginMobile.replace(/\D/g,'') === '8920046480' && loginPassword === 'Yash@0531066'){
+    setLoginBusy(true);
+    let ok = false;
+    try{
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ mobile: loginMobile, password: loginPassword })
+      });
+      const data = await res.json().catch(()=>({}));
+      ok = res.ok && data && data.ok === true;
+    }catch(e){
+      setLoginBusy(false);
+      setLoginError('Could not reach the server. Check your connection and try again.');
+      return;
+    }
+    setLoginBusy(false);
+    if(ok){
       sessionStorage.setItem('leadclean_authenticated','true');
       if(rememberMe){
         localStorage.setItem('leadclean_authenticated','true');
@@ -1273,6 +1313,97 @@ function App(){
       }else{
         setLoginError('Invalid mobile number or password. ' + (3-attempts) + ' attempt(s) remaining.');
       }
+    }
+  }
+
+  function openForgotPassword(){
+    setForgotOpen(true);
+    setForgotStep('email');
+    setForgotEmail('');
+    setForgotCode('');
+    setForgotNewPassword('');
+    setForgotConfirmPassword('');
+    setForgotError('');
+    setResetToken('');
+  }
+
+  function closeForgotPassword(){
+    setForgotOpen(false);
+  }
+
+  async function submitForgotEmail(e){
+    e.preventDefault();
+    setForgotError('');
+    setForgotBusy(true);
+    try{
+      const res = await fetch('/api/forgot-password', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: forgotEmail.trim() })
+      });
+      await res.json().catch(()=>({}));
+      // Same response shown whether or not the email matched — the backend
+      // itself never reveals which, so there's nothing more to branch on here.
+      setForgotStep('otp');
+    }catch(e){
+      setForgotError('Could not reach the server. Check your connection and try again.');
+    }finally{
+      setForgotBusy(false);
+    }
+  }
+
+  async function submitForgotOtp(e){
+    e.preventDefault();
+    setForgotError('');
+    setForgotBusy(true);
+    try{
+      const res = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: forgotEmail.trim(), code: forgotCode.trim() })
+      });
+      const data = await res.json().catch(()=>({}));
+      if(res.ok && data && data.resetToken){
+        setResetToken(data.resetToken);
+        setForgotStep('reset');
+      }else{
+        setForgotError((data && data.error) || 'That code is incorrect or has expired.');
+      }
+    }catch(e){
+      setForgotError('Could not reach the server. Check your connection and try again.');
+    }finally{
+      setForgotBusy(false);
+    }
+  }
+
+  async function submitForgotReset(e){
+    e.preventDefault();
+    setForgotError('');
+    if(forgotNewPassword.length < 8){
+      setForgotError('Password must be at least 8 characters.');
+      return;
+    }
+    if(forgotNewPassword !== forgotConfirmPassword){
+      setForgotError('Passwords do not match.');
+      return;
+    }
+    setForgotBusy(true);
+    try{
+      const res = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ resetToken, newPassword: forgotNewPassword })
+      });
+      const data = await res.json().catch(()=>({}));
+      if(res.ok && data && data.ok){
+        setForgotStep('done');
+      }else{
+        setForgotError((data && data.error) || 'Could not update the password. Start again.');
+      }
+    }catch(e){
+      setForgotError('Could not reach the server. Check your connection and try again.');
+    }finally{
+      setForgotBusy(false);
     }
   }
 
@@ -1326,13 +1457,73 @@ function App(){
                 <input type="checkbox" checked={rememberMe} onChange={e=>setRememberMe(e.target.checked)} />
                 <span>Remember me</span>
               </label>
-              <button type="button" className="forgot-link" onClick={()=>setLoginError('Password recovery is unavailable. Contact the administrator.')}>Forgot password?</button>
+              <button type="button" className="forgot-link" onClick={openForgotPassword}>Forgot password?</button>
             </div>
             {loginError && <p className="login-error">{lockSeconds > 0 ? 'Try again ' + lockSeconds + ' seconds later.' : loginError}</p>}
-            <button className="cta-btn" type="submit" disabled={lockSeconds > 0}>{lockSeconds > 0 ? 'Try again in ' + lockSeconds + 's' : 'Sign in'}</button>
+            <button className="cta-btn" type="submit" disabled={lockSeconds > 0 || loginBusy}>{lockSeconds > 0 ? 'Try again in ' + lockSeconds + 's' : (loginBusy ? 'Signing in…' : 'Sign in')}</button>
             <p className="login-privacy">Everything runs in this browser tab. No file is uploaded anywhere.</p>
           </form>
         </div>
+
+        {forgotOpen && (
+          <div className="forgot-overlay" role="dialog" aria-modal="true">
+            <div className="forgot-card">
+              <button type="button" className="forgot-close" onClick={closeForgotPassword} aria-label="Close">×</button>
+
+              {forgotStep === 'email' && (
+                <form onSubmit={submitForgotEmail}>
+                  <h2>Reset password</h2>
+                  <p>Enter the admin email. If it matches our records, we'll send a 6-digit code to it.</p>
+                  <div className="field">
+                    <label htmlFor="forgot-email">Email</label>
+                    <input id="forgot-email" className="text-input" type="email" placeholder="you@example.com" value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)} autoComplete="email" required />
+                  </div>
+                  {forgotError && <p className="login-error">{forgotError}</p>}
+                  <button className="cta-btn" type="submit" disabled={forgotBusy}>{forgotBusy ? 'Sending…' : 'Send code'}</button>
+                </form>
+              )}
+
+              {forgotStep === 'otp' && (
+                <form onSubmit={submitForgotOtp}>
+                  <h2>Enter the code</h2>
+                  <p>If {forgotEmail} is the registered admin email, a 6-digit code was just sent to it. It expires in 10 minutes.</p>
+                  <div className="field">
+                    <label htmlFor="forgot-code">6-digit code</label>
+                    <input id="forgot-code" className="text-input" type="text" inputMode="numeric" maxLength="6" placeholder="123456" value={forgotCode} onChange={e=>setForgotCode(e.target.value.replace(/\D/g,''))} autoComplete="one-time-code" required />
+                  </div>
+                  {forgotError && <p className="login-error">{forgotError}</p>}
+                  <button className="cta-btn" type="submit" disabled={forgotBusy}>{forgotBusy ? 'Verifying…' : 'Verify code'}</button>
+                  <button type="button" className="forgot-link" onClick={()=>setForgotStep('email')}>Use a different email</button>
+                </form>
+              )}
+
+              {forgotStep === 'reset' && (
+                <form onSubmit={submitForgotReset}>
+                  <h2>Set a new password</h2>
+                  <p>Choose a new password (at least 8 characters).</p>
+                  <div className="field">
+                    <label htmlFor="forgot-new-password">New password</label>
+                    <input id="forgot-new-password" className="text-input" type="password" value={forgotNewPassword} onChange={e=>setForgotNewPassword(e.target.value)} autoComplete="new-password" required />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="forgot-confirm-password">Confirm new password</label>
+                    <input id="forgot-confirm-password" className="text-input" type="password" value={forgotConfirmPassword} onChange={e=>setForgotConfirmPassword(e.target.value)} autoComplete="new-password" required />
+                  </div>
+                  {forgotError && <p className="login-error">{forgotError}</p>}
+                  <button className="cta-btn" type="submit" disabled={forgotBusy}>{forgotBusy ? 'Saving…' : 'Update password'}</button>
+                </form>
+              )}
+
+              {forgotStep === 'done' && (
+                <div>
+                  <h2>Password updated</h2>
+                  <p>Your password has been changed. You can sign in now with your new password.</p>
+                  <button className="cta-btn" type="button" onClick={closeForgotPassword}>Back to sign in</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     );
   }
