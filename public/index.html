@@ -280,6 +280,12 @@ select,.text-input{width:100%;padding:10px 12px;border:1px solid var(--line);bor
 .forgot-card .login-error{color:#ff8a8a}
 .forgot-close{position:absolute;top:10px;right:14px;background:none;border:none;color:#8a9089;font-size:22px;line-height:1;cursor:pointer;padding:4px}
 .forgot-close:hover{color:#eef1ee}
+.name-clickable{cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.name-clickable:hover{text-decoration:underline}
+.name-edit-icon{font-size:12px;opacity:.55}
+.name-edit-row{display:flex;align-items:center;gap:4px}
+.name-edit-input{padding:4px 8px;font-size:14px;max-width:220px}
+.name-edit-ext{color:var(--muted);font-size:13px}
 </style>
 </head>
 <body>
@@ -545,6 +551,8 @@ function App(){
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null);
   const [zipping, setZipping] = useState(false);
+  const [customFileNames, setCustomFileNames] = useState({});
+  const [editingOutputIdx, setEditingOutputIdx] = useState(null);
   const [downloadsCap, setDownloadsCap] = useState(undefined);
   const [authenticated, setAuthenticated] = useState(()=>sessionStorage.getItem('leadclean_authenticated') === 'true' || localStorage.getItem('leadclean_authenticated') === 'true');
   const [loginMobile, setLoginMobile] = useState('');
@@ -1104,6 +1112,8 @@ function App(){
       unmatchedLookup: mobileMode==='lookup' ? unmatchedLookup : null,
       outputs,
     });
+    setCustomFileNames({});
+    setEditingOutputIdx(null);
     pushLog('Done — ' + outputs.length + ' file(s) ready', 'ok');
   }
 
@@ -1125,7 +1135,7 @@ function App(){
     setZipping(true);
     try{
       const zip = new JSZip();
-      result.outputs.forEach(out => zip.file(out.name, out.blob));
+      result.outputs.forEach((out, idx) => zip.file(effectiveOutputName(idx), out.blob));
       const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE'});
       let zipBase = String(outputNames[0] || '').trim();
       if(!zipBase) zipBase = mode==='merge' ? 'merged_leads' : 'unique_mobiles';
@@ -1164,8 +1174,8 @@ function App(){
 
     try{
       const rows = [['File Name']];
-      result.outputs.forEach(out=>{
-        const name = out.name.replace(/\.csv$/i,'');
+      result.outputs.forEach((out, idx)=>{
+        const name = effectiveOutputName(idx).replace(/\.csv$/i,'');
         rows.push([name]);
       });
 
@@ -1214,17 +1224,38 @@ function App(){
     setSplitMode('none');
     setSplitValue('');
     setOutputNames([]);
+    setCustomFileNames({});
+    setEditingOutputIdx(null);
     pushLog('Reset output — choose settings and process again', 'ok');
+  }
+
+  // Returns the name a given output file will actually download as — the
+  // user's edited name if they renamed it via the pencil icon, else the
+  // auto-generated name.
+  function effectiveOutputName(idx){
+    const out = result.outputs[idx];
+    return customFileNames[idx] || out.name;
+  }
+
+  function renameOutput(idx, rawBase){
+    const base = String(rawBase).replace(/[\\/:*?"<>|]/g,'-').trim();
+    setCustomFileNames(prev=>{
+      const next = {...prev};
+      if(base) next[idx] = base + '.csv';
+      else delete next[idx];
+      return next;
+    });
   }
 
   async function saveOutput(idx){
     const out = result.outputs[idx];
+    const name = effectiveOutputName(idx);
     if(downloadsCap){
       try{
-        await downloadsCap.save({filename: out.name, data: out.blob});
+        await downloadsCap.save({filename: name, data: out.blob});
         markSaved(idx);
       }catch(e){
-        pushLog('Save cancelled: ' + out.name, 'err');
+        pushLog('Save cancelled: ' + name, 'err');
       }
       return;
     }
@@ -1233,7 +1264,7 @@ function App(){
       // a plain browser download, exactly like any other site.
       const url = URL.createObjectURL(out.blob);
       const a = document.createElement('a');
-      a.href = url; a.download = out.name;
+      a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(()=>URL.revokeObjectURL(url), 4000);
       markSaved(idx);
@@ -1242,7 +1273,7 @@ function App(){
     const text = await out.blob.text();
     try{
       await navigator.clipboard.writeText(text);
-      pushLog('Copied ' + out.name + ' to clipboard (downloads unavailable here)', 'ok');
+      pushLog('Copied ' + name + ' to clipboard (downloads unavailable here)', 'ok');
     }catch(e){
       pushLog('Clipboard unavailable — open this page outside the preview to download.', 'err');
     }
@@ -1891,17 +1922,41 @@ function App(){
                     </button>
                   </div>
                 </div>
-                {result.outputs.map((o,idx)=>(
-                  <div className="output-row" key={o.name}>
-                    <div className="meta">
-                      <div className="name">{o.name}</div>
-                      <div className="sub">{fmtNum(o.rowCount)} rows · {fmtBytes(o.size)}</div>
+                {result.outputs.map((o,idx)=>{
+                  const effectiveName = effectiveOutputName(idx);
+                  const isEditing = editingOutputIdx === idx;
+                  return (
+                    <div className="output-row" key={o.name}>
+                      <div className="meta">
+                        {isEditing ? (
+                          <div className="name-edit-row">
+                            <input
+                              type="text"
+                              className="text-input name-edit-input"
+                              defaultValue={effectiveName.replace(/\.csv$/i,'')}
+                              autoFocus
+                              onKeyDown={e=>{
+                                if(e.key==='Enter'){ renameOutput(idx, e.target.value); setEditingOutputIdx(null); }
+                                if(e.key==='Escape'){ setEditingOutputIdx(null); }
+                              }}
+                              onBlur={e=>{ renameOutput(idx, e.target.value); setEditingOutputIdx(null); }}
+                            />
+                            <span className="name-edit-ext">.csv</span>
+                          </div>
+                        ) : (
+                          <div className="name name-clickable" onClick={()=>setEditingOutputIdx(idx)} title="Click to rename before downloading">
+                            {effectiveName}
+                            <span className="name-edit-icon">✏️</span>
+                          </div>
+                        )}
+                        <div className="sub">{fmtNum(o.rowCount)} rows · {fmtBytes(o.size)}</div>
+                      </div>
+                      <button className="dl-btn" data-done={o.saved} onClick={()=>saveOutput(idx)}>
+                        {o.saved ? 'Saved ✓' : 'Download'}
+                      </button>
                     </div>
-                    <button className="dl-btn" data-done={o.saved} onClick={()=>saveOutput(idx)}>
-                      {o.saved ? 'Saved ✓' : 'Download'}
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
                 {downloadsCap === null && <p className="panel-sub" style={{marginTop:10}}>Direct download isn't available in this preview — "Download" copies the file's contents to your clipboard instead.</p>}
               </section>
             )}
